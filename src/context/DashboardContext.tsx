@@ -6,9 +6,17 @@ import {
   useEffect,
   type ReactNode,
 } from 'react'
-import type { Ticker, ChartRange, StockSimulation } from '../types'
+import type {
+  Ticker,
+  ChartRange,
+  StockSimulation,
+  ActiveTrade,
+  CompletedTrade,
+  DailyGoal,
+} from '../types'
 import { fetchStockData, POLL_MS } from '../services/stockService'
 import { useSimulations } from '../hooks/useSimulations'
+import { useTrades } from '../hooks/useTrades'
 
 interface DashboardContextValue {
   tickers: Ticker[]
@@ -29,6 +37,19 @@ interface DashboardContextValue {
   ) => StockSimulation
   removeSimulation: (id: string) => void
   clearAll: () => void
+
+  activeTrades: ActiveTrade[]
+  completedTrades: CompletedTrade[]
+  todayCompleted: CompletedTrade[]
+  dailyProfit: number
+  goal: DailyGoal
+  setGoal: (goal: DailyGoal) => void
+  addActiveTrade: (
+    input: Omit<ActiveTrade, 'id' | 'timestamp'>
+  ) => ActiveTrade
+  removeActiveTrade: (id: string) => void
+  closeTrade: (id: string, sellPrice: number) => CompletedTrade | null
+  clearCompletedTrades: () => void
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
@@ -70,6 +91,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [tickers])
 
   const simulationsHook = useSimulations()
+  const tradesHook = useTrades()
 
   const loadTicker = async (
     id: string,
@@ -211,6 +233,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setTickerRange,
     setActiveTicker: setActiveTickerId,
     ...simulationsHook,
+    ...tradesHook,
   }
 
   return (

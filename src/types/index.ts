@@ -42,3 +42,26 @@ export interface StockSimulation {
   expectedProfitPercent: number
   timestamp: number
 }
+
+export interface ActiveTrade {
+  id: string
+  symbol: string
+  shares: number
+  buyPrice: number
+  timestamp: number
+}
+
+export interface CompletedTrade {
+  id: string
+  symbol: string
+  shares: number
+  buyPrice: number
+  sellPrice: number
+  profitUSD: number
+  timestamp: number
+}
+
+export interface DailyGoal {
+  min: number
+  max: number
+}

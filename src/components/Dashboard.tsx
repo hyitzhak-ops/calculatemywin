@@ -1,10 +1,20 @@
-import { BarChart3 } from 'lucide-react'
+import { useState } from 'react'
+import { BarChart3, ShieldCheck } from 'lucide-react'
 import { TickerGrid } from './TickerGrid'
 import { PercentCalculator } from './PercentCalculator'
 import { PositionCalculator } from './PositionCalculator'
 import { SimulationLog } from './SimulationLog'
+import { RiskManagerTab } from './RiskManagerTab'
+import { useDashboard } from '../context/DashboardContext'
+import { formatUSD } from '../utils/format'
+
+type ActiveTab = 'dashboard' | 'risk-manager'
 
 export function Dashboard() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard')
+  const { dailyProfit, goal } = useDashboard()
+  const goalReached = dailyProfit >= goal.min
+
   return (
     <div className="min-h-screen bg-zinc-950">
       {/* Header */}
@@ -24,23 +34,57 @@ export function Dashboard() {
                 </p>
               </div>
             </div>
-            <div className="hidden sm:block text-xs text-zinc-500">
-              Calculations update as you type
+            <div className="hidden sm:flex items-center gap-3 text-xs text-zinc-500">
+              <span>Today:</span>
+              <span
+                className={`font-mono tabular-nums font-semibold ${
+                  goalReached
+                    ? 'text-emerald-300'
+                    : dailyProfit < 0
+                    ? 'text-red-400'
+                    : 'text-zinc-300'
+                }`}
+              >
+                {formatUSD(dailyProfit)}
+              </span>
             </div>
+          </div>
+
+          {/* Tab Switcher */}
+          <div className="mt-4 flex items-center gap-1 border-b border-zinc-800/0 -mb-4">
+            <TabButton
+              active={activeTab === 'dashboard'}
+              onClick={() => setActiveTab('dashboard')}
+              icon={<BarChart3 className="w-4 h-4" />}
+              label="Live Dashboard"
+            />
+            <TabButton
+              active={activeTab === 'risk-manager'}
+              onClick={() => setActiveTab('risk-manager')}
+              icon={<ShieldCheck className="w-4 h-4" />}
+              label="Daily Goal & Risk Manager"
+              badge={goalReached ? '🎯' : undefined}
+            />
           </div>
         </div>
       </header>
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        <TickerGrid />
+        {activeTab === 'dashboard' ? (
+          <>
+            <TickerGrid />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <PercentCalculator />
-          <PositionCalculator />
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <PercentCalculator />
+              <PositionCalculator />
+            </div>
 
-        <SimulationLog />
+            <SimulationLog />
+          </>
+        ) : (
+          <RiskManagerTab />
+        )}
       </main>
 
       {/* Footer */}
@@ -56,5 +100,34 @@ export function Dashboard() {
         </div>
       </footer>
     </div>
+  )
+}
+
+interface TabButtonProps {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  badge?: string
+}
+
+function TabButton({ active, onClick, icon, label, badge }: TabButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition ${
+        active
+          ? 'border-emerald-400 text-emerald-300'
+          : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+      {badge && (
+        <span className="ml-1 text-xs bg-emerald-400 text-zinc-950 rounded-full px-1.5 py-0.5 font-bold">
+          {badge}
+        </span>
+      )}
+    </button>
   )
 }
