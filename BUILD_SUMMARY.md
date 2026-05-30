@@ -1,182 +1,235 @@
 # Build Summary — Calculate My Win
 
-## ✅ Build Status
+A complete, production-ready, **100% client-side** day trading dashboard combining a live multi-stock watchlist, a daily-goal/risk manager with profit & stop-loss matrices, and a journal & analytics tab with equity curve, calendar, and JSON backup/restore.
 
-**SUCCESS** — All TypeScript code compiles without errors. Production build completed successfully.
+---
 
-```
-npm run build ✓
-```
+## Build Status
 
-## 📦 What Was Built
+`npm run build` — succeeds with zero TypeScript errors. `npm run dev` boots the dashboard with AAPL pre-loaded.
 
-A complete, production-ready day trading dashboard with the following features:
+---
 
-### Core Features Implemented
+## Tab 1 — Live Dashboard & Calculator
 
-1. **Multi-Ticker Watchlist**
-   - Track multiple stocks simultaneously
-   - Independent time range selection per ticker (10m / 1h / 3h / 1d / 1w / 1mo / 1y)
-   - Live data polling every 15 seconds
-   - Manual refresh with visual loading indicator
-   - Add/remove tickers dynamically
-   - Active ticker selection for calculator integration
+The original calculator + watchlist surface.
 
-2. **Live Price Charts**
-   - Interactive area charts using Recharts
-   - Color-coded trends (green for up, red for down)
-   - Responsive tooltips with formatted prices
-   - Adaptive Y-axis scaling
-   - Time-formatted X-axis labels per range
+| Feature | Description |
+|---------|-------------|
+| Multi-ticker watchlist | Add/remove any number of tickers, each with independent state |
+| Live polling | All loaded tickers refresh every 15 s (refs avoid interval restarts) |
+| 7 time ranges | `10m / 1h / 3h / 1d / 1w / 1mo / 1y` per ticker |
+| Smart fallback chain | Finnhub → Yahoo Finance → deterministic mock data |
+| Color-coded charts | Recharts AreaChart, green-up / red-down, no dots, activeDot on hover |
+| Mode A — Percent | `(sell − buy) / buy × 100` recomputed instantly via `useMemo` |
+| Mode B — Position | Shares × price difference, "Use live price" pulls from active ticker |
+| Simulation log | Last 50 saved calculations in `localStorage`, individual + bulk delete |
 
-3. **Smart Data Fetching**
-   - **Primary**: Finnhub API (optional key)
-   - **Fallback**: Yahoo Finance via CORS proxy
-   - **Last resort**: Deterministic mock data
-   - Parallel fetch strategy for best-available data
-   - Clear visual indicators (Live · finnhub / Live · yahoo / Demo)
-   - Comprehensive console logging for debugging
+---
 
-4. **Mode A — Percentage Calculator**
-   - Instant calculation as you type
-   - Simple buy/sell price comparison
-   - Returns percentage gain/loss
-   - Color-coded results (green/red)
-   - Input validation
+## Tab 2 — Daily Goal & Risk Manager
 
-5. **Mode B — Position Calculator**
-   - Full position profit/loss calculation
-   - Number of shares × price difference
-   - Shows both USD profit and percentage
-   - "Use live price" button integrates with active ticker
-   - Log simulation feature
-   - Metrics cards showing investment and P&L
+Active position management with paired profit/stop-loss matrices.
 
-6. **Simulation Log**
-   - Persistent storage via localStorage
-   - Recent 50 simulations cap
-   - Individual entry removal
-   - Bulk "Clear all" action
-   - Relative timestamps (e.g., "5m ago")
-   - Color-coded profit/loss values
-   - Survives page refresh
+### Daily Realized Profit Card
+- Live sum of every closed trade for the current calendar day
+- Configurable `min` / `max` daily goal (e.g. $1,000 – $2,000)
+- Progress bar fills from 0 → goal.min, then turns brighter when reached
+- **Goal-reached banner** is purely visual — every input/button stays usable past the goal
+- Live `+$X over goal` chip when `dailyProfit > goal.min`
+- Live `well above max (...over)` pill when `dailyProfit > goal.max`
+- Down-day advisory banner when net negative
 
-### Technical Implementation
+### Add Trade Form
+Symbol / shares / buy price → instantly persisted to `localStorage`.
 
-**Tech Stack:**
-- React 19 with TypeScript
-- Vite for build tooling
-- Tailwind CSS v4 (via @tailwindcss/vite)
-- Recharts for data visualization
-- Lucide React for icons
-- Context API for state management
-- localStorage for persistence
+### Active Position Cards
+For each open trade, a side-by-side 2-column layout:
 
-**Architecture:**
+- **Profit Targets matrix (green-tinted)** — for tiers 5 / 10 / 15 / 20 %, displays
+  - `targetPrice = buyPrice × (1 + tier)`
+  - `totalValue = shares × targetPrice`
+  - `netProfit = (targetPrice − buyPrice) × shares`
+- **Stop-Loss Thresholds matrix (red-tinted, `bg-red-950/20` / `text-red-400`)** — same tiers downside
+  - `stopPrice = buyPrice × (1 − tier)`
+  - `totalValue = shares × stopPrice`
+  - `netLoss = (buyPrice − stopPrice) × shares`
+
+### Close & Discard Actions
+- **Report Sale** — open a confirm form with a live P/L preview, then commit the close (moves the trade from `activeTrades` → `completedTrades`)
+- **Discard** — removes a position without recording a sale
+
+### Today's Closed Trades Table
+Symbol / shares / buy / sell / profit / time, with one-click "Clear all".
+
+---
+
+## Tab 3 — Journal & Reports
+
+Long-term performance analytics, written reflections, and full-state backup.
+
+### Backup & Restore
+- **Export Backup** — bundles every `localStorage` slice into one JSON file:
+  ```
+  trading_dashboard_backup_YYYY-MM-DD.json
+  ```
+  Includes: `activeTrades`, `completedTrades`, `dailyGoal`, `dailyJournalNotes`, `simulations`, plus `version`, `exportedAt`, and `app` headers.
+- **Import Backup** — opens a hidden `<input type="file" accept=".json" />`, parses with `FileReader`, validates structural keys (rejects with *"Invalid backup file format."* if missing), then confirms before overwriting. On success, dispatches a `BACKUP_REFRESH_EVENT` that **bumps a key on `<DashboardProvider>`** — every hook re-reads `localStorage` cleanly without a manual page reload.
+- Per-key shape validation lets partial / older backups still restore everything they can.
+- Buttons appear both in the global sticky header and as a high-visibility panel at the top of Tab 3.
+
+### Reporting Window (shared filter)
+A single source of truth that drives both the equity curve and the date-range report below:
+- Preset chips: `Today · This Week · This Month · This Quarter · Custom`
+- Custom mode reveals two `<input type="date">` fields with min/max wired together
+
+### Equity Curve Chart
+Premium Recharts AreaChart sitting prominently below the filter:
+- Smooth `monotone` cumulative-P/L curve, starting at $0 at the beginning of the window
+- Linear gradient fill under the curve, dynamic stroke (emerald `#10b981` on net positive, red `#f87171` on net negative)
+- `ReferenceLine y={0}`, minimal grid, hidden tick lines for a clean financial look
+- **Custom dark tooltip** showing **Date · Cumulative · Growth % · Day P/L · Trades**
+- Recharts' built-in 900 ms ease-out animation + a CSS `equityFadeIn` keyframe for a "drawing" entrance
+- `growthPercent = cumulative ÷ Σ(buyPrice × shares) × 100` (return on capital actually deployed in the window)
+- **4-card summary bar**: Peak Equity, Max Drawdown, Max Daily Win, Max Daily Loss — each captioned with the exact date it occurred
+
+### Performance Calendar (monthly)
+- `grid-cols-7` layout for the visible month with prev / today / next nav
+- Each cell shows that day's **net P/L** and **trade count**, color-coded:
+  - Green tint when net > 0
+  - Red tint when net < 0
+  - Neutral gray when no trades
+- Today's cell is ringed in emerald
+- A pencil icon appears on any day with a saved note
+- Click any day to open the Daily Note Modal
+
+### Monthly Summary Banner
+Net P/L, total trades, and active days for the visible month — sits above the calendar grid.
+
+### Daily Note Modal
+- Textarea seeded with any existing note for that date
+- Saves instantly to `localStorage` under `calculatemywin_journal_notes` (keyed by `YYYY-MM-DD`)
+- Shows that day's net P/L + W/L breakdown in the header
+- Esc key and click-outside both dismiss
+- Inline delete on existing notes
+
+### Lessons Learned Timeline
+Every day with a journal note, sorted newest first. Each entry shows the date, that day's net P/L badge (green / red / "no trades"), trade count, and the full note text — with inline delete.
+
+### Date-Range Report
+8 stat cards driven by the same Reporting Window:
+- Net P/L · Total Trades · Wins (with win-rate %) · Losses
+- Best Day · Worst Day · Breakeven · Avg / Trade
+
+---
+
+## Architecture
+
 ```
 src/
-├── types/              # TypeScript interfaces
-├── utils/              # Calculations & formatting
-├── services/           # Stock data fetching
-├── hooks/              # Custom React hooks
-├── context/            # Global state management
-└── components/         # React components
-    ├── ui/             # Reusable UI components
-    └── ...             # Feature components
+├── App.tsx                         # Provider wrapper · listens for backup-restore event to remount
+├── main.tsx
+├── index.css                       # Tailwind import + .fade-in-chart keyframe
+├── types/index.ts                  # All shared TS interfaces (incl. DailyJournalNote)
+├── utils/
+│   ├── format.ts                   # USD/percent/color helpers + toLocalDateStr / parseLocalDateStr / formatDateLong
+│   ├── calculations.ts             # Pure calc functions
+│   └── backup.ts                   # buildBackupPayload · exportBackupToFile · validateBackup · applyBackup · readBackupFile
+├── services/
+│   └── stockService.ts             # Finnhub + Yahoo + mock fallback chain
+├── hooks/
+│   ├── useTrades.ts                # activeTrades · completedTrades · dailyGoal
+│   ├── useJournal.ts               # dailyJournalNotes (Record<dateStr, DailyJournalNote>)
+│   ├── useSimulations.ts           # calculator log (last 50)
+│   └── usePerformanceData.ts       # equity curve points + drawdown summary
+├── context/
+│   └── DashboardContext.tsx        # aggregates useTrades + useSimulations + useJournal
+└── components/
+    ├── ui/Panel.tsx · Field.tsx
+    ├── Dashboard.tsx               # Header, sticky tab switcher, layout
+    ├── BackupControls.tsx          # Export/Import buttons (header + panel variants)
+    ├── TickerGrid.tsx · StockTickerPanel.tsx · PriceChart.tsx
+    ├── PercentCalculator.tsx       # Tab 1 — Mode A
+    ├── PositionCalculator.tsx      # Tab 1 — Mode B
+    ├── SimulationLog.tsx           # Tab 1 — log
+    ├── RiskManagerTab.tsx          # Tab 2
+    ├── JournalReportsTab.tsx       # Tab 3 (calendar · notes · range report)
+    └── EquityCurveChart.tsx        # Tab 3 (chart + drawdown stats)
 ```
 
-**Key Design Decisions:**
-- Pure functions for calculations (instant updates via useMemo)
-- No Submit buttons — everything updates as you type
-- Polling uses refs to avoid interval restarts
-- Each ticker maintains independent state
-- Centralized color helpers (profitColorClass)
-- Comprehensive error handling with graceful fallbacks
+### Persistence — five `localStorage` slices
 
-## 📋 Acceptance Criteria — All Met
+| Slice              | Key                                  | Shape |
+|--------------------|--------------------------------------|-------|
+| `activeTrades`     | `calculatemywin_active_trades`       | `ActiveTrade[]` |
+| `completedTrades`  | `calculatemywin_completed_trades`    | `CompletedTrade[]` (max 200) |
+| `dailyGoal`        | `calculatemywin_daily_goal`          | `{ min, max }` |
+| `dailyJournalNotes`| `calculatemywin_journal_notes`       | `Record<YYYY-MM-DD, DailyJournalNote>` |
+| `simulations`      | `calculatemywin_simulations`         | `StockSimulation[]` (max 50) |
 
-- [x] `npm run build` succeeds with no TypeScript errors
-- [x] `npm run dev` opens a dark dashboard with AAPL pre-loaded
-- [x] Ticker shows green `Live · yahoo` (or `finnhub`) pill when network available
-- [x] Clicking `+ Add stock` adds a new empty ticker
-- [x] Typing `NVDA` and pressing Load fetches and shows chart
-- [x] Each ticker has 7 working range tabs that refetch on click
-- [x] Mode A and Mode B render side by side on `md` and up
-- [x] Both calculators update results instantly without Submit button
-- [x] Profit colors flip green/red correctly
-- [x] "Use live price" button fills Mode B's Buy Price from active ticker
-- [x] "Set active" moves emerald ring and changes Mode B header symbol
-- [x] "Log simulation" persists across full page reload
-- [x] Removing ticker with X works; last ticker can't be removed (replaced)
-- [x] All numbers use monospace + tabular-nums
-- [x] No backend, no server, no hardcoded API keys
-- [x] App works with mock data even if all external requests fail
+### Backup file shape (v1)
 
-## 🎨 Visual Design
-
-- **Theme**: Dark financial/trading aesthetic (Bloomberg/TradingView minimal)
-- **Colors**:
-  - Background: `bg-zinc-950`
-  - Panels: `bg-zinc-900/60` with `border-zinc-800/80`
-  - Accent: `emerald-400` / `emerald-500`
-  - Profit: `text-green-400`
-  - Loss: `text-red-400`
-- **Typography**:
-  - UI: IBM Plex Sans
-  - Numbers: JetBrains Mono with tabular-nums
-- **Layout**: Responsive grid (1 col mobile, 2 col lg+)
-
-## 🚀 Getting Started
-
-```bash
-# Install dependencies
-npm install
-
-# Optional: Add Finnhub API key
-cp .env.example .env
-# Edit .env and add VITE_FINNHUB_API_KEY=your_key_here
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
+```json
+{
+  "version": 1,
+  "exportedAt": "2026-05-31T18:42:11.000Z",
+  "app": "calculate-my-win",
+  "data": {
+    "activeTrades":      [ ... ],
+    "completedTrades":   [ ... ],
+    "dailyGoal":         { "min": 1000, "max": 2000 },
+    "dailyJournalNotes": { "2026-05-30": { "dateStr": "2026-05-30", "note": "...", "updatedAt": 1717000000000 } },
+    "simulations":       [ ... ]
+  }
+}
 ```
 
-## 📖 Documentation
+A legacy raw-JSON shape (without the wrapping `version` / `data` envelope) is also accepted by the validator for backwards compatibility.
 
-- **README.md** — Full project documentation with setup instructions
-- **TESTING.md** — Comprehensive testing checklist
-- **.env.example** — Environment variable template
+---
 
-## 🔍 Data Source Behavior
+## Key Design Decisions
 
-| Finnhub | Yahoo | Result |
-|---------|-------|--------|
-| ✓ | ✓ | Finnhub quote + Yahoo chart → `Live · finnhub` |
-| ✓ | ✗ | Finnhub quote + Mock chart → `Live · finnhub` |
-| ✗ | ✓ | Yahoo quote + Yahoo chart → `Live · yahoo` |
-| ✗ | ✗ | Mock quote + Mock chart → `Demo` (amber) |
+- **Calculations are pure functions** wrapped in `useMemo` — instant updates as you type, no submit buttons
+- **The goal-reached state is purely visual** — there are no `disabled` props tied to `goalReached`, and the `dailyProfit` sum is uncapped, so trades after $2,000 keep accumulating ($2,300 → $2,500 → …)
+- **Timezones are local** — every date key (`YYYY-MM-DD`) is derived from local-browser time via `toLocalDateStr`, so calendar cells align with the user's day
+- **`<DashboardProvider key={reloadKey}>`** — bumping the key on `BACKUP_REFRESH_EVENT` is the simplest correct way to remount every hook so they all re-read `localStorage`
+- **Refs for polling** — the 15 s ticker poll reads from `tickersRef.current` so the interval never restarts on every render
+- **Per-key validation** — backup imports check shape per slice; partial / older files still restore everything they can rather than rejecting outright
+- **Each ticker is independent** — range, quote, chart, and source are stored per-ticker
+- **Single shared Reporting Window** — Tab 3 lifts the date-range filter to the parent so the chart and report stay perfectly in sync
 
-## 🎯 What Makes This Implementation Special
+---
 
-1. **Zero Backend** — Fully client-side with smart fallbacks
-2. **Instant Feedback** — All calculations update as you type
-3. **Resilient** — Works perfectly even with zero API access
-4. **Production-Ready** — TypeScript, proper error handling, accessible
-5. **Developer-Friendly** — Comprehensive console logs for debugging
-6. **User-Friendly** — Clear visual indicators, persistent state, responsive design
+## Visual Design
 
-## 📦 Bundle Size
+- **Theme**: dark financial / Bloomberg-minimal
+- **Background**: `bg-zinc-950` page · `bg-zinc-900/60` panels · `bg-slate-900/50` chart container
+- **Accents**: `emerald-400 / 500` for active states + profits · `red-400` for losses · `amber-300` for journal note markers
+- **Profit/loss**: `text-green-400` / `text-red-400` everywhere, mediated by `profitColorClass()`
+- **Typography**: IBM Plex Sans for UI · JetBrains Mono with `tabular-nums` for every number
 
-```
-dist/index.html                   0.84 kB
-dist/assets/index-DXjbwhc4.css   22.41 kB
-dist/assets/index-CGHFJ7N4.js   620.43 kB (178.30 kB gzipped)
-```
+---
 
-## 🏁 Status
+## Tech Stack
 
-**COMPLETE** — All specification requirements met. Ready for production deployment.
+- React 19 + TypeScript + Vite 6
+- Tailwind CSS v4 via `@tailwindcss/vite`
+- Recharts 2.15 for all area charts
+- Lucide React for icons
+- Context API + 4 custom hooks for state
+- `localStorage` only — no backend, no accounts, no hosted database
 
-The app is running at http://localhost:5173 (dev server).
+---
+
+## Documentation
+
+- **README.md** — full project documentation, tab-by-tab feature list, backup/restore guide
+- **TESTING.md** — manual testing checklist covering every feature in every tab
+- **BUILD_SUMMARY.md** — this file
+
+---
+
+## Status
+
+**COMPLETE** — All three tabs ship full feature sets, all data persists, backup/restore is verified, and `npm run build` is clean.
