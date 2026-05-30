@@ -216,7 +216,7 @@ function DailySummaryCard({
       </div>
 
       <div className="px-5 py-6">
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-baseline gap-3 flex-wrap">
           <span
             className={`text-5xl font-mono tabular-nums font-semibold ${
               goalReached
@@ -229,6 +229,16 @@ function DailySummaryCard({
           {goal.min > 0 && (
             <span className="text-sm text-zinc-500 font-mono">
               {formatPercent((dailyProfit / goal.min) * 100)} of min
+            </span>
+          )}
+          {goalReached && dailyProfit > goal.min && (
+            <span className="text-xs font-mono tabular-nums px-2 py-0.5 rounded bg-emerald-400/15 border border-emerald-300/40 text-emerald-200">
+              +{formatUSD(dailyProfit - goal.min)} over goal
+            </span>
+          )}
+          {goal.max > 0 && dailyProfit > goal.max && (
+            <span className="text-xs font-mono tabular-nums px-2 py-0.5 rounded bg-emerald-300/20 border border-emerald-200/50 text-emerald-100 font-semibold">
+              well above max ({formatUSD(dailyProfit - goal.max)} over)
             </span>
           )}
         </div>
@@ -257,6 +267,11 @@ function DailySummaryCard({
                 🎯 Goal Achieved! You made your profit for today. Turn off the
                 computer, step away, and come back tomorrow. The mission is
                 accomplished.
+              </p>
+              <p className="mt-2 text-xs text-emerald-200/80 leading-relaxed">
+                This is a visual milestone, not a lock — every input, button,
+                and trade action stays fully available. Your daily total keeps
+                updating live with each new closed trade.
               </p>
             </div>
           </div>
