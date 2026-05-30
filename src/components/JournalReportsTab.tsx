@@ -12,6 +12,7 @@ import {
   Filter,
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
+import { BackupControls } from './BackupControls'
 import { useDashboard } from '../context/DashboardContext'
 import {
   formatUSD,
@@ -100,6 +101,13 @@ export function JournalReportsTab() {
 
   return (
     <div className="space-y-6">
+      <Panel
+        title="Backup & Restore"
+        subtitle="Download a JSON of every trade, note, and setting · re-import to restore on any device"
+      >
+        <BackupControls variant="panel" />
+      </Panel>
+
       <PerformanceCalendar
         viewMonth={viewMonth}
         setViewMonth={setViewMonth}

@@ -6,6 +6,7 @@ import { PositionCalculator } from './PositionCalculator'
 import { SimulationLog } from './SimulationLog'
 import { RiskManagerTab } from './RiskManagerTab'
 import { JournalReportsTab } from './JournalReportsTab'
+import { BackupControls } from './BackupControls'
 import { useDashboard } from '../context/DashboardContext'
 import { formatUSD } from '../utils/format'
 
@@ -35,19 +36,22 @@ export function Dashboard() {
                 </p>
               </div>
             </div>
-            <div className="hidden sm:flex items-center gap-3 text-xs text-zinc-500">
-              <span>Today:</span>
-              <span
-                className={`font-mono tabular-nums font-semibold ${
-                  goalReached
-                    ? 'text-emerald-300'
-                    : dailyProfit < 0
-                    ? 'text-red-400'
-                    : 'text-zinc-300'
-                }`}
-              >
-                {formatUSD(dailyProfit)}
-              </span>
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-3 text-xs text-zinc-500">
+                <span>Today:</span>
+                <span
+                  className={`font-mono tabular-nums font-semibold ${
+                    goalReached
+                      ? 'text-emerald-300'
+                      : dailyProfit < 0
+                      ? 'text-red-400'
+                      : 'text-zinc-300'
+                  }`}
+                >
+                  {formatUSD(dailyProfit)}
+                </span>
+              </div>
+              <BackupControls />
             </div>
           </div>
 
