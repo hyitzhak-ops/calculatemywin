@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
 import { BackupControls } from './BackupControls'
+import { EquityCurveChart } from './EquityCurveChart'
 import { useDashboard } from '../context/DashboardContext'
 import {
   formatUSD,
@@ -81,6 +82,56 @@ function endOfQuarter(d: Date): Date {
   return new Date(d.getFullYear(), qStart + 3, 0, 23, 59, 59, 999)
 }
 
+interface ResolvedRange {
+  start: Date
+  end: Date
+  label: string
+}
+
+function resolveRange(
+  preset: RangePreset,
+  customStart: string,
+  customEnd: string
+): ResolvedRange {
+  const now = new Date()
+  switch (preset) {
+    case 'today':
+      return { start: startOfDay(now), end: endOfDay(now), label: 'Today' }
+    case 'week':
+      return {
+        start: startOfWeek(now),
+        end: endOfDay(now),
+        label: 'This Week',
+      }
+    case 'month':
+      return {
+        start: new Date(now.getFullYear(), now.getMonth(), 1),
+        end: endOfDay(now),
+        label: 'This Month',
+      }
+    case 'quarter':
+      return {
+        start: startOfQuarter(now),
+        end: endOfQuarter(now),
+        label: 'This Quarter',
+      }
+    case 'custom':
+      return {
+        start: startOfDay(parseLocalDateStr(customStart)),
+        end: endOfDay(parseLocalDateStr(customEnd)),
+        label: 'Custom Range',
+      }
+  }
+}
+
+const PRESETS: { key: RangePreset; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'quarter', label: 'This Quarter' },
+  { key: 'custom', label: 'Custom' },
+]
+
 export function JournalReportsTab() {
   const {
     completedTrades,
@@ -95,6 +146,17 @@ export function JournalReportsTab() {
   })
   const [openNoteFor, setOpenNoteFor] = useState<string | null>(null)
 
+  const [preset, setPreset] = useState<RangePreset>('month')
+  const [customStart, setCustomStart] = useState(() =>
+    toLocalDateStr(new Date())
+  )
+  const [customEnd, setCustomEnd] = useState(() => toLocalDateStr(new Date()))
+
+  const range = useMemo(
+    () => resolveRange(preset, customStart, customEnd),
+    [preset, customStart, customEnd]
+  )
+
   const dailyAgg = useMemo(() => aggregateByDay(completedTrades), [
     completedTrades,
   ])
@@ -107,6 +169,25 @@ export function JournalReportsTab() {
       >
         <BackupControls variant="panel" />
       </Panel>
+
+      <RangeFilterBar
+        preset={preset}
+        setPreset={setPreset}
+        customStart={customStart}
+        setCustomStart={setCustomStart}
+        customEnd={customEnd}
+        setCustomEnd={setCustomEnd}
+        rangeLabel={range.label}
+        rangeStart={range.start}
+        rangeEnd={range.end}
+      />
+
+      <EquityCurveChart
+        trades={completedTrades}
+        rangeStart={range.start}
+        rangeEnd={range.end}
+        rangeLabel={range.label}
+      />
 
       <PerformanceCalendar
         viewMonth={viewMonth}
@@ -123,7 +204,7 @@ export function JournalReportsTab() {
         onDelete={removeJournalNote}
       />
 
-      <RangeReport completedTrades={completedTrades} />
+      <RangeReport completedTrades={completedTrades} range={range} />
 
       {openNoteFor && (
         <DailyNoteModal
@@ -479,52 +560,88 @@ function InsightsTimeline({
   )
 }
 
-interface RangeReportProps {
-  completedTrades: CompletedTrade[]
+interface RangeFilterBarProps {
+  preset: RangePreset
+  setPreset: (p: RangePreset) => void
+  customStart: string
+  setCustomStart: (s: string) => void
+  customEnd: string
+  setCustomEnd: (s: string) => void
+  rangeLabel: string
+  rangeStart: Date
+  rangeEnd: Date
 }
 
-function RangeReport({ completedTrades }: RangeReportProps) {
-  const [preset, setPreset] = useState<RangePreset>('month')
-  const [customStart, setCustomStart] = useState(() =>
-    toLocalDateStr(new Date())
+function RangeFilterBar({
+  preset,
+  setPreset,
+  customStart,
+  setCustomStart,
+  customEnd,
+  setCustomEnd,
+  rangeLabel,
+  rangeStart,
+  rangeEnd,
+}: RangeFilterBarProps) {
+  return (
+    <Panel
+      title="Reporting Window"
+      subtitle={`${rangeLabel} · ${toLocalDateStr(rangeStart)} → ${toLocalDateStr(rangeEnd)}`}
+      action={<Filter className="w-4 h-4 text-zinc-500" />}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {PRESETS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => setPreset(p.key)}
+            className={`text-xs px-3 py-1.5 rounded-md border transition font-medium ${
+              preset === p.key
+                ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-300'
+                : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' && (
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Start
+            </label>
+            <input
+              type="date"
+              value={customStart}
+              max={customEnd}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              End
+            </label>
+            <input
+              type="date"
+              value={customEnd}
+              min={customStart}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            />
+          </div>
+        </div>
+      )}
+    </Panel>
   )
-  const [customEnd, setCustomEnd] = useState(() => toLocalDateStr(new Date()))
+}
 
-  const range = useMemo(() => {
-    const now = new Date()
-    switch (preset) {
-      case 'today':
-        return { start: startOfDay(now), end: endOfDay(now), label: 'Today' }
-      case 'week':
-        return {
-          start: startOfWeek(now),
-          end: endOfDay(now),
-          label: 'This Week',
-        }
-      case 'month':
-        return {
-          start: new Date(now.getFullYear(), now.getMonth(), 1),
-          end: endOfDay(now),
-          label: 'This Month',
-        }
-      case 'quarter':
-        return {
-          start: startOfQuarter(now),
-          end: endOfQuarter(now),
-          label: 'This Quarter',
-        }
-      case 'custom': {
-        const s = parseLocalDateStr(customStart)
-        const e = parseLocalDateStr(customEnd)
-        return {
-          start: startOfDay(s),
-          end: endOfDay(e),
-          label: 'Custom Range',
-        }
-      }
-    }
-  }, [preset, customStart, customEnd])
+interface RangeReportProps {
+  completedTrades: CompletedTrade[]
+  range: ResolvedRange
+}
 
+function RangeReport({ completedTrades, range }: RangeReportProps) {
   const stats = useMemo(() => {
     let total = 0
     let wins = 0
@@ -558,64 +675,8 @@ function RangeReport({ completedTrades }: RangeReportProps) {
     <Panel
       title="Date-Range Report"
       subtitle={`${range.label} · ${toLocalDateStr(range.start)} → ${toLocalDateStr(range.end)}`}
-      action={<Filter className="w-4 h-4 text-zinc-500" />}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {(['today', 'week', 'month', 'quarter', 'custom'] as RangePreset[]).map(
-          (p) => (
-            <button
-              key={p}
-              onClick={() => setPreset(p)}
-              className={`text-xs px-3 py-1.5 rounded-md border transition font-medium ${
-                preset === p
-                  ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-300'
-                  : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
-              }`}
-            >
-              {p === 'today'
-                ? 'Today'
-                : p === 'week'
-                ? 'This Week'
-                : p === 'month'
-                ? 'This Month'
-                : p === 'quarter'
-                ? 'This Quarter'
-                : 'Custom'}
-            </button>
-          )
-        )}
-      </div>
-
-      {preset === 'custom' && (
-        <div className="mt-3 flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Start
-            </label>
-            <input
-              type="date"
-              value={customStart}
-              max={customEnd}
-              onChange={(e) => setCustomStart(e.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              End
-            </label>
-            <input
-              type="date"
-              value={customEnd}
-              min={customStart}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Net P/L" valueClass={profitColorClass(stats.net)}>
           {stats.net >= 0 ? '+' : ''}
           {formatUSD(stats.net)}
