@@ -53,7 +53,7 @@ export function RiskManagerTab() {
 
       <Panel
         title={`Active Positions (${activeTrades.length})`}
-        subtitle="Multi-target profit matrix · 5% / 10% / 15% / 20%"
+        subtitle="Profit targets & stop-loss thresholds · 5% / 10% / 15% / 20%"
       >
         {activeTrades.length === 0 ? (
           <div className="text-sm text-zinc-500 py-6 text-center">
@@ -420,13 +420,24 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
   const [closing, setClosing] = useState(false)
   const [sellInput, setSellInput] = useState('')
 
-  const tiers = useMemo(
+  const profitTiers = useMemo(
     () =>
       TARGET_TIERS.map((pct) => {
         const targetPrice = trade.buyPrice * (1 + pct)
         const totalValue = trade.shares * targetPrice
         const netProfit = (targetPrice - trade.buyPrice) * trade.shares
         return { pct, targetPrice, totalValue, netProfit }
+      }),
+    [trade.buyPrice, trade.shares]
+  )
+
+  const lossTiers = useMemo(
+    () =>
+      TARGET_TIERS.map((pct) => {
+        const stopPrice = trade.buyPrice * (1 - pct)
+        const totalValue = trade.shares * stopPrice
+        const netLoss = (trade.buyPrice - stopPrice) * trade.shares
+        return { pct, stopPrice, totalValue, netLoss }
       }),
     [trade.buyPrice, trade.shares]
   )
@@ -483,39 +494,92 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
       </div>
 
       <div className="p-4 space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {tiers.map((tier) => (
-            <div
-              key={tier.pct}
-              className="rounded-md border border-zinc-800 bg-zinc-900/60 p-3"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
-                  +{(tier.pct * 100).toFixed(0)}%
-                </span>
-                <span className="text-[10px] text-emerald-400 font-mono">
-                  {formatPercent(tier.pct * 100)}
-                </span>
-              </div>
-              <div className="mt-1.5 text-base font-mono tabular-nums text-zinc-100">
-                {formatUSD(tier.targetPrice)}
-              </div>
-              <div className="mt-2 pt-2 border-t border-zinc-800/60 space-y-0.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-500">Total</span>
-                  <span className="font-mono tabular-nums text-zinc-300">
-                    {formatUSD(tier.totalValue)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-500">Profit</span>
-                  <span className="font-mono tabular-nums text-emerald-400">
-                    +{formatUSD(tier.netProfit)}
-                  </span>
-                </div>
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="rounded-md border border-emerald-500/20 bg-emerald-950/10 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">
+                Profit Targets
+              </span>
+              <span className="text-[10px] text-zinc-500">· Take Profit</span>
             </div>
-          ))}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {profitTiers.map((tier) => (
+                <div
+                  key={tier.pct}
+                  className="rounded-md border border-emerald-500/20 bg-emerald-950/20 p-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                      +{(tier.pct * 100).toFixed(0)}%
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono">
+                      {formatPercent(tier.pct * 100)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-base font-mono tabular-nums text-emerald-200">
+                    {formatUSD(tier.targetPrice)}
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-emerald-500/15 space-y-0.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500">Total</span>
+                      <span className="font-mono tabular-nums text-zinc-300">
+                        {formatUSD(tier.totalValue)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500">Profit</span>
+                      <span className="font-mono tabular-nums text-emerald-400">
+                        +{formatUSD(tier.netProfit)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-red-500/20 bg-red-950/10 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[10px] uppercase tracking-wider text-red-400 font-bold">
+                Stop-Loss Thresholds
+              </span>
+              <span className="text-[10px] text-zinc-500">· Cut Losses</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {lossTiers.map((tier) => (
+                <div
+                  key={tier.pct}
+                  className="rounded-md border border-red-500/20 bg-red-950/20 p-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+                      −{(tier.pct * 100).toFixed(0)}%
+                    </span>
+                    <span className="text-[10px] text-red-400 font-mono">
+                      −{formatPercent(tier.pct * 100)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-base font-mono tabular-nums text-red-200">
+                    {formatUSD(tier.stopPrice)}
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-red-500/15 space-y-0.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500">Total</span>
+                      <span className="font-mono tabular-nums text-zinc-300">
+                        {formatUSD(tier.totalValue)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500">Loss</span>
+                      <span className="font-mono tabular-nums text-red-400">
+                        −{formatUSD(tier.netLoss)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {closing && (
