@@ -13,10 +13,12 @@ import type {
   ActiveTrade,
   CompletedTrade,
   DailyGoal,
+  DailyJournalNote,
 } from '../types'
 import { fetchStockData, POLL_MS } from '../services/stockService'
 import { useSimulations } from '../hooks/useSimulations'
 import { useTrades } from '../hooks/useTrades'
+import { useJournal } from '../hooks/useJournal'
 
 interface DashboardContextValue {
   tickers: Ticker[]
@@ -50,6 +52,10 @@ interface DashboardContextValue {
   removeActiveTrade: (id: string) => void
   closeTrade: (id: string, sellPrice: number) => CompletedTrade | null
   clearCompletedTrades: () => void
+
+  journalNotes: Record<string, DailyJournalNote>
+  setJournalNote: (dateStr: string, note: string) => void
+  removeJournalNote: (dateStr: string) => void
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
@@ -92,6 +98,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const simulationsHook = useSimulations()
   const tradesHook = useTrades()
+  const journalHook = useJournal()
 
   const loadTicker = async (
     id: string,
@@ -234,6 +241,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setActiveTicker: setActiveTickerId,
     ...simulationsHook,
     ...tradesHook,
+    ...journalHook,
   }
 
   return (

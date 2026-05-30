@@ -65,3 +65,9 @@ export interface DailyGoal {
   min: number
   max: number
 }
+
+export interface DailyJournalNote {
+  dateStr: string // YYYY-MM-DD (local time)
+  note: string
+  updatedAt: number
+}

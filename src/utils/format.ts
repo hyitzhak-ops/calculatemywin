@@ -43,6 +43,29 @@ export function formatTime(date: Date): string {
   }).format(date)
 }
 
+export function toLocalDateStr(input: number | Date): string {
+  const d = input instanceof Date ? input : new Date(input)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+export function parseLocalDateStr(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+
+export function formatDateLong(dateStr: string): string {
+  const d = parseLocalDateStr(dateStr)
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d)
+}
+
 export function formatDateTime(timestamp: number): string {
   const date = new Date(timestamp)
   const now = Date.now()

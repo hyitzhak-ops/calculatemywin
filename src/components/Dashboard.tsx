@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { BarChart3, ShieldCheck } from 'lucide-react'
+import { BarChart3, ShieldCheck, BookOpen } from 'lucide-react'
 import { TickerGrid } from './TickerGrid'
 import { PercentCalculator } from './PercentCalculator'
 import { PositionCalculator } from './PositionCalculator'
 import { SimulationLog } from './SimulationLog'
 import { RiskManagerTab } from './RiskManagerTab'
+import { JournalReportsTab } from './JournalReportsTab'
 import { useDashboard } from '../context/DashboardContext'
 import { formatUSD } from '../utils/format'
 
-type ActiveTab = 'dashboard' | 'risk-manager'
+type ActiveTab = 'dashboard' | 'risk-manager' | 'journal'
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard')
@@ -65,13 +66,19 @@ export function Dashboard() {
               label="Daily Goal & Risk Manager"
               badge={goalReached ? '🎯' : undefined}
             />
+            <TabButton
+              active={activeTab === 'journal'}
+              onClick={() => setActiveTab('journal')}
+              icon={<BookOpen className="w-4 h-4" />}
+              label="Journal & Reports"
+            />
           </div>
         </div>
       </header>
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {activeTab === 'dashboard' ? (
+        {activeTab === 'dashboard' && (
           <>
             <TickerGrid />
 
@@ -82,9 +89,9 @@ export function Dashboard() {
 
             <SimulationLog />
           </>
-        ) : (
-          <RiskManagerTab />
         )}
+        {activeTab === 'risk-manager' && <RiskManagerTab />}
+        {activeTab === 'journal' && <JournalReportsTab />}
       </main>
 
       {/* Footer */}
