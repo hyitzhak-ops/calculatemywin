@@ -46,6 +46,7 @@ import {
   type RiskScanResult,
   type RiskSeverity,
 } from '../services/riskScannerService'
+import { fetchStockData } from '../services/stockService'
 
 const TARGET_TIERS = [0.05, 0.1, 0.15, 0.2] as const
 
@@ -359,6 +360,11 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
   const [maxRisk, setMaxRisk] = useState('')
   const [shares, setShares] = useState('')
   const [sharesManuallyEdited, setSharesManuallyEdited] = useState(false)
+  // Live price injection state
+  const [livePriceFetching, setLivePriceFetching] = useState(false)
+  const [buyPriceIsLive, setBuyPriceIsLive] = useState(false)
+  const [buyPriceManuallyEdited, setBuyPriceManuallyEdited] = useState(false)
+  const livePriceAbortRef = useRef<AbortController | null>(null)
 
   const reset = () => {
     setSymbol('')
@@ -367,6 +373,8 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
     setMaxRisk('')
     setShares('')
     setSharesManuallyEdited(false)
+    setBuyPriceIsLive(false)
+    setBuyPriceManuallyEdited(false)
   }
 
   const buyNum = parseFloat(buyPrice)
@@ -398,6 +406,53 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
     if (recommendedShares == null) return
     setShares(recommendedShares.toString())
   }, [recommendedShares, sharesManuallyEdited])
+
+  // Live price fetch — fires 600ms after the symbol settles (same cadence as the
+  // risk scanner). Only injects the price when the user hasn't manually edited
+  // the Buy Price field, so a pre-planned limit order price is never clobbered.
+  useEffect(() => {
+    livePriceAbortRef.current?.abort()
+
+    const trimmed = symbol.trim().toUpperCase()
+    if (trimmed.length < 1) {
+      setLivePriceFetching(false)
+      if (!buyPriceManuallyEdited) {
+        setBuyPrice('')
+        setBuyPriceIsLive(false)
+      }
+      return
+    }
+
+    setLivePriceFetching(true)
+    const controller = new AbortController()
+    livePriceAbortRef.current = controller
+
+    const handle = window.setTimeout(async () => {
+      try {
+        const result = await fetchStockData(trimmed, '1d')
+        if (controller.signal.aborted) return
+        const price = result.quote.price
+        if (Number.isFinite(price) && price > 0 && !buyPriceManuallyEdited) {
+          setBuyPrice(price.toFixed(2))
+          setBuyPriceIsLive(true)
+          // Re-arm share auto-fill so it recalculates from the new price
+          setSharesManuallyEdited(false)
+        }
+      } catch {
+        // Silently swallow — the user can still type the price manually
+      } finally {
+        if (!controller.signal.aborted) setLivePriceFetching(false)
+      }
+    }, 600)
+
+    return () => {
+      window.clearTimeout(handle)
+      controller.abort()
+    }
+    // buyPriceManuallyEdited intentionally excluded — we only want this to
+    // re-run when the symbol changes, not when the edit flag flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol])
 
   const handleSharesChange = (val: string) => {
     setShares(val)
@@ -493,16 +548,77 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
               value={symbol}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             />
-            <Field
-              label="Buy Price (Entry)"
-              prefix="$"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="0.00"
-              value={buyPrice}
-              onChange={(e) => setBuyPrice(e.target.value)}
-            />
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-medium text-zinc-400">
+                  Buy Price (Entry)
+                </label>
+                <span className="flex items-center gap-1 h-4">
+                  {livePriceFetching && (
+                    <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      fetching…
+                    </span>
+                  )}
+                  {!livePriceFetching && buyPriceIsLive && !buyPriceManuallyEdited && (
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                      <Zap className="w-2.5 h-2.5" />
+                      Live Price
+                    </span>
+                  )}
+                  {buyPriceManuallyEdited && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuyPriceManuallyEdited(false)
+                        // Re-trigger the live price if we have a symbol
+                        const trimmed = symbol.trim().toUpperCase()
+                        if (trimmed.length > 0) {
+                          setBuyPriceIsLive(false)
+                          setBuyPrice('')
+                          setLivePriceFetching(true)
+                          fetchStockData(trimmed, '1d').then((result) => {
+                            const price = result.quote.price
+                            if (Number.isFinite(price) && price > 0) {
+                              setBuyPrice(price.toFixed(2))
+                              setBuyPriceIsLive(true)
+                              setSharesManuallyEdited(false)
+                            }
+                          }).catch(() => {/* silent */}).finally(() => setLivePriceFetching(false))
+                        }
+                      }}
+                      className="text-[10px] text-zinc-500 hover:text-emerald-300 transition"
+                    >
+                      Reset to live
+                    </button>
+                  )}
+                </span>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm pointer-events-none select-none">
+                  $
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder={livePriceFetching ? '' : '0.00'}
+                  value={buyPrice}
+                  onChange={(e) => {
+                    setBuyPrice(e.target.value)
+                    setBuyPriceManuallyEdited(true)
+                    setBuyPriceIsLive(false)
+                  }}
+                  className={`w-full rounded-md border bg-zinc-900/80 pl-7 pr-3 py-2 text-sm text-zinc-100 font-mono tabular-nums placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition ${
+                    livePriceFetching
+                      ? 'border-zinc-700 animate-pulse'
+                      : buyPriceIsLive && !buyPriceManuallyEdited
+                      ? 'border-emerald-500/50'
+                      : 'border-zinc-700'
+                  }`}
+                />
+              </div>
+            </div>
             <div>
               <Field
                 label="Stop-Loss Price"
