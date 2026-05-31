@@ -1,8 +1,9 @@
-import { RefreshCw, X, TrendingUp, TrendingDown } from 'lucide-react'
+import { RefreshCw, X, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react'
 import type { Ticker, ChartRange } from '../types'
 import { useDashboard } from '../context/DashboardContext'
 import { formatPrice, formatPercent, formatTime, profitColorClass } from '../utils/format'
-import { RANGE_CONFIG } from '../services/stockService'
+import { RANGE_CONFIG, MARKET_OVERLAY_SYMBOL } from '../services/stockService'
+import { useVolatilityAlert } from '../hooks/useVolatilityAlert'
 import { PriceChart } from './PriceChart'
 
 interface StockTickerPanelProps {
@@ -42,6 +43,11 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
     : 'Enter a symbol above and press Load'
 
   const positive = (ticker.quote?.change ?? 0) >= 0
+
+  const volatility = useVolatilityAlert(
+    ticker.symbol || null,
+    ticker.quote?.price
+  )
 
   return (
     <div
@@ -164,6 +170,9 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
               </div>
             </div>
 
+            {/* Advanced metrics row (Gap + Pre-Market range) */}
+            <AdvancedMetricsRow ticker={ticker} />
+
             {/* OHLC stats */}
             <div className="grid grid-cols-4 gap-3 text-xs">
               <div>
@@ -216,9 +225,107 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
           ))}
         </div>
 
-        {/* Price chart */}
-        <PriceChart data={ticker.chart} positive={positive} />
+        {/* Price chart with optional volatility flash */}
+        <div
+          className={`relative rounded-md transition-all ${
+            volatility.active
+              ? 'ring-2 ring-amber-400/70 animate-volatility-pulse'
+              : ''
+          }`}
+        >
+          {volatility.active && (
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/20 border border-amber-400/60 text-amber-200 text-[10px] font-semibold tracking-wide uppercase shadow-lg">
+              <AlertTriangle className="w-3 h-3" />
+              <span>
+                High Volatility · {volatility.pctChange >= 0 ? '+' : ''}
+                {volatility.pctChange.toFixed(2)}% in{' '}
+                {Math.round(volatility.windowMs / 1000)}s
+              </span>
+            </div>
+          )}
+          <PriceChart
+            data={ticker.chart}
+            positive={positive}
+            overlay={ticker.overlay}
+            overlaySymbol={MARKET_OVERLAY_SYMBOL}
+            preMarketHigh={ticker.quote?.preMarketHigh}
+            preMarketLow={ticker.quote?.preMarketLow}
+          />
+          {ticker.overlay.length > 1 && (
+            <div className="px-1 mt-1 flex items-center gap-2 text-[10px] text-zinc-500">
+              <span className="inline-block w-3 h-px bg-zinc-400 opacity-60" />
+              <span className="font-mono">
+                {MARKET_OVERLAY_SYMBOL} · % since open (relative strength)
+              </span>
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  )
+}
+
+interface AdvancedMetricsRowProps {
+  ticker: Ticker
+}
+
+function AdvancedMetricsRow({ ticker }: AdvancedMetricsRowProps) {
+  const q = ticker.quote
+  if (!q) return null
+
+  const hasGap =
+    q.gapDollar !== undefined &&
+    q.gapPercent !== undefined &&
+    Number.isFinite(q.gapDollar) &&
+    Number.isFinite(q.gapPercent)
+  const hasPreMarket =
+    q.preMarketHigh !== undefined && q.preMarketLow !== undefined
+
+  if (!hasGap && !hasPreMarket) return null
+
+  const gapPositive = (q.gapPercent ?? 0) >= 0
+
+  return (
+    <div className="flex flex-wrap gap-2 text-[11px]">
+      {hasGap && (
+        <div
+          className={`flex items-center gap-2 px-2.5 py-1 rounded-md border font-mono tabular-nums ${
+            gapPositive
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-300'
+          }`}
+          title="Gap = today's open vs. yesterday's close"
+        >
+          <span className="text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
+            Gap
+          </span>
+          <span>
+            {gapPositive ? '+' : ''}
+            {(q.gapPercent ?? 0).toFixed(2)}%
+          </span>
+          <span className="opacity-70">
+            ({gapPositive ? '+' : ''}
+            {formatPrice(q.gapDollar ?? 0)})
+          </span>
+        </div>
+      )}
+      {hasPreMarket && (
+        <div
+          className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900/60 text-zinc-300 font-mono tabular-nums"
+          title="Pre-market high/low (4:00–9:30 ET)"
+        >
+          <span className="text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
+            Pre-Mkt
+          </span>
+          <span className="text-emerald-300">
+            H {formatPrice(q.preMarketHigh!)}
+          </span>
+          <span className="opacity-50">·</span>
+          <span className="text-red-300">
+            L {formatPrice(q.preMarketLow!)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

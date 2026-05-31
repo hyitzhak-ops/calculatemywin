@@ -16,6 +16,9 @@ import {
   Save,
   AlertTriangle,
   ListOrdered,
+  Sparkles,
+  Trophy,
+  ShieldAlert,
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
 import { BackupControls } from './BackupControls'
@@ -28,7 +31,12 @@ import {
   parseLocalDateStr,
   formatDateLong,
 } from '../utils/format'
-import type { CompletedTrade, DailyJournalNote } from '../types'
+import type {
+  CompletedTrade,
+  DailyJournalNote,
+  TradeCatalyst,
+} from '../types'
+import { TRADE_CATALYSTS } from '../types'
 
 type RangePreset = 'today' | 'week' | 'month' | 'quarter' | 'custom'
 
@@ -197,6 +205,10 @@ export function JournalReportsTab() {
         rangeEnd={range.end}
         rangeLabel={range.label}
       />
+
+      <GoldStatistics completedTrades={completedTrades} />
+
+      <EdgeFinder completedTrades={completedTrades} />
 
       <PerformanceCalendar
         viewMonth={viewMonth}
@@ -756,6 +768,7 @@ function HistoricalTradeForm({ onSubmit }: HistoricalTradeFormProps) {
   const [shares, setShares] = useState('')
   const [buyPrice, setBuyPrice] = useState('')
   const [sellPrice, setSellPrice] = useState('')
+  const [catalyst, setCatalyst] = useState<TradeCatalyst | ''>('')
   const [error, setError] = useState<string | null>(null)
   const [confirmation, setConfirmation] = useState<{
     dateStr: string
@@ -786,6 +799,7 @@ function HistoricalTradeForm({ onSubmit }: HistoricalTradeFormProps) {
     setShares('')
     setBuyPrice('')
     setSellPrice('')
+    setCatalyst('')
     setError(null)
   }
 
@@ -845,6 +859,7 @@ function HistoricalTradeForm({ onSubmit }: HistoricalTradeFormProps) {
       sellPrice: x,
       profitUSD,
       timestamp,
+      ...(catalyst ? { catalyst } : {}),
     })
 
     setConfirmation({ dateStr: date, profit: profitUSD })
@@ -902,7 +917,7 @@ function HistoricalTradeForm({ onSubmit }: HistoricalTradeFormProps) {
           onSubmit={handleSubmit}
           className="rounded-md border border-zinc-800 bg-slate-900/40 p-4 space-y-3"
         >
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1.5">
                 Trade Date
@@ -972,6 +987,25 @@ function HistoricalTradeForm({ onSubmit }: HistoricalTradeFormProps) {
                 placeholder="148.10"
                 className="w-full rounded-md border border-zinc-700 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
               />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1.5">
+                Strategy
+              </label>
+              <select
+                value={catalyst}
+                onChange={(e) =>
+                  setCatalyst(e.target.value as TradeCatalyst | '')
+                }
+                className="w-full rounded-md border border-zinc-700 bg-zinc-950/70 px-2 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+              >
+                <option value="">— Untagged —</option>
+                {TRADE_CATALYSTS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -1308,6 +1342,9 @@ function TradeRow({
   const [shares, setShares] = useState(String(trade.shares))
   const [buyPrice, setBuyPrice] = useState(String(trade.buyPrice))
   const [sellPrice, setSellPrice] = useState(String(trade.sellPrice))
+  const [catalyst, setCatalyst] = useState<TradeCatalyst | ''>(
+    trade.catalyst ?? ''
+  )
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1316,6 +1353,7 @@ function TradeRow({
       setShares(String(trade.shares))
       setBuyPrice(String(trade.buyPrice))
       setSellPrice(String(trade.sellPrice))
+      setCatalyst(trade.catalyst ?? '')
       setError(null)
     }
   }, [editing, trade])
@@ -1356,6 +1394,7 @@ function TradeRow({
       shares: s,
       buyPrice: b,
       sellPrice: x,
+      catalyst: catalyst || undefined,
     })
   }
 
@@ -1396,7 +1435,7 @@ function TradeRow({
   if (editing) {
     return (
       <li className="rounded-md border border-emerald-500/30 bg-slate-900/40 p-3 space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           <FieldLabel label="Symbol">
             <input
               type="text"
@@ -1438,6 +1477,22 @@ function TradeRow({
               onChange={(e) => setSellPrice(e.target.value)}
               className="w-full rounded-md border border-zinc-700 bg-zinc-950/70 px-2 py-1.5 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
             />
+          </FieldLabel>
+          <FieldLabel label="Strategy">
+            <select
+              value={catalyst}
+              onChange={(e) =>
+                setCatalyst(e.target.value as TradeCatalyst | '')
+              }
+              className="w-full rounded-md border border-zinc-700 bg-zinc-950/70 px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            >
+              <option value="">— Untagged —</option>
+              {TRADE_CATALYSTS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </FieldLabel>
         </div>
 
@@ -1524,6 +1579,11 @@ function TradeRow({
             {trade.profitUSD >= 0 ? '+' : ''}
             {formatUSD(trade.profitUSD)}
           </div>
+          {trade.catalyst && (
+            <div className="mt-0.5 inline-block text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 bg-zinc-900/80 text-zinc-300 truncate">
+              {trade.catalyst}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
@@ -1559,5 +1619,444 @@ function FieldLabel({ label, children }: FieldLabelProps) {
       </span>
       {children}
     </label>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gold Statistics — overall edge metrics across ALL completed trades
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface GoldStatisticsProps {
+  completedTrades: CompletedTrade[]
+}
+
+interface OverallStats {
+  total: number
+  wins: number
+  losses: number
+  breakeven: number
+  winRate: number          // 0..100
+  grossProfit: number
+  grossLoss: number        // positive number representing absolute loss
+  profitFactor: number | null
+  avgWin: number
+  avgLoss: number          // positive number
+  expectancy: number       // signed avg P/L per trade
+}
+
+function computeOverallStats(trades: CompletedTrade[]): OverallStats {
+  let wins = 0
+  let losses = 0
+  let breakeven = 0
+  let grossProfit = 0
+  let grossLoss = 0
+  for (const t of trades) {
+    if (t.profitUSD > 0) {
+      wins += 1
+      grossProfit += t.profitUSD
+    } else if (t.profitUSD < 0) {
+      losses += 1
+      grossLoss += -t.profitUSD
+    } else {
+      breakeven += 1
+    }
+  }
+  const total = trades.length
+  const winRate = total > 0 ? (wins / total) * 100 : 0
+  const profitFactor =
+    grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : null
+  const avgWin = wins > 0 ? grossProfit / wins : 0
+  const avgLoss = losses > 0 ? grossLoss / losses : 0
+  const expectancy = total > 0 ? (grossProfit - grossLoss) / total : 0
+  return {
+    total,
+    wins,
+    losses,
+    breakeven,
+    winRate,
+    grossProfit,
+    grossLoss,
+    profitFactor,
+    avgWin,
+    avgLoss,
+    expectancy,
+  }
+}
+
+function GoldStatistics({ completedTrades }: GoldStatisticsProps) {
+  const stats = useMemo(
+    () => computeOverallStats(completedTrades),
+    [completedTrades]
+  )
+
+  if (stats.total === 0) {
+    return (
+      <Panel
+        title="Gold Statistics"
+        subtitle="Overall edge metrics across every closed trade"
+        action={<Sparkles className="w-4 h-4 text-amber-300" />}
+      >
+        <div className="py-6 text-center text-sm text-zinc-500">
+          Close a trade to start tracking your edge.
+        </div>
+      </Panel>
+    )
+  }
+
+  const winRateColor =
+    stats.winRate >= 50
+      ? 'text-emerald-300'
+      : stats.winRate >= 33
+      ? 'text-amber-300'
+      : 'text-red-300'
+  const pfColor =
+    stats.profitFactor === null
+      ? 'text-zinc-400'
+      : stats.profitFactor === Infinity
+      ? 'text-emerald-300'
+      : stats.profitFactor >= 1.5
+      ? 'text-emerald-300'
+      : stats.profitFactor >= 1
+      ? 'text-amber-300'
+      : 'text-red-300'
+
+  const winLossRatio =
+    stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : null
+
+  return (
+    <Panel
+      title="Gold Statistics"
+      subtitle={`Edge metrics over ${stats.total} closed ${
+        stats.total === 1 ? 'trade' : 'trades'
+      }`}
+      action={<Sparkles className="w-4 h-4 text-amber-300" />}
+    >
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <BigStatCard
+          label="Win Rate"
+          primary={`${stats.winRate.toFixed(1)}%`}
+          primaryClass={winRateColor}
+          sub={`${stats.wins}W · ${stats.losses}L${
+            stats.breakeven > 0 ? ` · ${stats.breakeven}BE` : ''
+          }`}
+        />
+        <BigStatCard
+          label="Profit Factor"
+          primary={
+            stats.profitFactor === null
+              ? 'N/A'
+              : stats.profitFactor === Infinity
+              ? '∞'
+              : stats.profitFactor.toFixed(2)
+          }
+          primaryClass={pfColor}
+          sub={
+            stats.profitFactor === null
+              ? 'No losses recorded'
+              : `${formatUSD(stats.grossProfit)} ÷ ${formatUSD(stats.grossLoss)}`
+          }
+        />
+        <BigStatCard
+          label="Avg Win"
+          primary={`+${formatUSD(stats.avgWin)}`}
+          primaryClass="text-emerald-300"
+          sub={
+            winLossRatio !== null
+              ? `${winLossRatio.toFixed(2)}× avg loss`
+              : '—'
+          }
+        />
+        <BigStatCard
+          label="Avg Loss"
+          primary={`−${formatUSD(stats.avgLoss)}`}
+          primaryClass="text-red-300"
+          sub={`Expectancy ${stats.expectancy >= 0 ? '+' : ''}${formatUSD(
+            stats.expectancy
+          )} / trade`}
+          subClass={profitColorClass(stats.expectancy)}
+        />
+      </div>
+    </Panel>
+  )
+}
+
+interface BigStatCardProps {
+  label: string
+  primary: string
+  primaryClass?: string
+  sub?: string
+  subClass?: string
+}
+
+function BigStatCard({
+  label,
+  primary,
+  primaryClass,
+  sub,
+  subClass,
+}: BigStatCardProps) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-slate-950/60 px-4 py-3">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">
+        {label}
+      </div>
+      <div
+        className={`mt-1 text-3xl font-mono tabular-nums font-bold leading-tight ${
+          primaryClass ?? 'text-zinc-100'
+        }`}
+      >
+        {primary}
+      </div>
+      {sub && (
+        <div
+          className={`mt-1 text-[11px] font-mono tabular-nums ${
+            subClass ?? 'text-zinc-500'
+          }`}
+        >
+          {sub}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edge Finder — group trades by catalyst, surface best & worst strategies
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface EdgeFinderProps {
+  completedTrades: CompletedTrade[]
+}
+
+interface CatalystBreakdown {
+  catalyst: TradeCatalyst | 'Untagged'
+  count: number
+  wins: number
+  losses: number
+  net: number
+  winRate: number
+}
+
+const UNTAGGED_KEY = 'Untagged' as const
+
+function aggregateByCatalyst(
+  trades: CompletedTrade[]
+): CatalystBreakdown[] {
+  const map = new Map<string, CatalystBreakdown>()
+  for (const t of trades) {
+    const key = (t.catalyst ?? UNTAGGED_KEY) as TradeCatalyst | 'Untagged'
+    const cur =
+      map.get(key) ??
+      ({
+        catalyst: key,
+        count: 0,
+        wins: 0,
+        losses: 0,
+        net: 0,
+        winRate: 0,
+      } as CatalystBreakdown)
+    cur.count += 1
+    cur.net += t.profitUSD
+    if (t.profitUSD > 0) cur.wins += 1
+    else if (t.profitUSD < 0) cur.losses += 1
+    map.set(key, cur)
+  }
+  for (const c of map.values()) {
+    c.winRate = c.count > 0 ? (c.wins / c.count) * 100 : 0
+  }
+  return Array.from(map.values()).sort((a, b) => b.net - a.net)
+}
+
+function EdgeFinder({ completedTrades }: EdgeFinderProps) {
+  const breakdown = useMemo(
+    () => aggregateByCatalyst(completedTrades),
+    [completedTrades]
+  )
+
+  const tagged = breakdown.filter((b) => b.catalyst !== UNTAGGED_KEY)
+
+  if (completedTrades.length === 0) {
+    return null
+  }
+
+  // Need at least one tagged catalyst to surface insights
+  if (tagged.length === 0) {
+    return (
+      <Panel
+        title="Edge Finder · Strategy Breakdown"
+        subtitle="Tag your trades with a strategy to discover where your edge lives"
+        action={<Trophy className="w-4 h-4 text-amber-300" />}
+      >
+        <div className="py-6 text-center text-sm text-zinc-500 flex flex-col items-center gap-2">
+          <ShieldAlert className="w-6 h-6 text-zinc-700" />
+          None of your closed trades are tagged with a strategy yet. Tag them
+          via the close form, the historical entry form, or by editing a trade
+          inside the calendar modal.
+        </div>
+      </Panel>
+    )
+  }
+
+  // Best = top net positive · Worst = bottom net negative (only flag if it's actually negative)
+  const best = tagged[0]
+  const worst = tagged[tagged.length - 1]
+  const showBest = best.net > 0
+  const showWorst = worst.net < 0 && worst !== best
+
+  return (
+    <Panel
+      title="Edge Finder · Strategy Breakdown"
+      subtitle="Where your money is being made — and lost"
+      action={<Trophy className="w-4 h-4 text-amber-300" />}
+    >
+      <div className="space-y-3">
+        {(showBest || showWorst) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {showBest && (
+              <InsightCallout
+                tone="positive"
+                title="Your Edge"
+                body={
+                  <>
+                    🟢 You are highly profitable when trading{' '}
+                    <span className="font-semibold">{best.catalyst}</span> (
+                    <span className="font-mono tabular-nums">
+                      +{formatUSD(best.net)} net · {best.winRate.toFixed(0)}% win
+                    </span>
+                    ).
+                  </>
+                }
+              />
+            )}
+            {showWorst && (
+              <InsightCallout
+                tone="negative"
+                title="Risk Warning"
+                body={
+                  <>
+                    🔴 <span className="font-semibold">{worst.catalyst}</span>{' '}
+                    trades are costing you the most money (
+                    <span className="font-mono tabular-nums">
+                      −{formatUSD(Math.abs(worst.net))} net ·{' '}
+                      {worst.winRate.toFixed(0)}% win
+                    </span>
+                    ). Avoid these setups.
+                  </>
+                }
+              />
+            )}
+          </div>
+        )}
+
+        <CatalystTable rows={breakdown} />
+      </div>
+    </Panel>
+  )
+}
+
+interface InsightCalloutProps {
+  tone: 'positive' | 'negative'
+  title: string
+  body: React.ReactNode
+}
+
+function InsightCallout({ tone, title, body }: InsightCalloutProps) {
+  const cls =
+    tone === 'positive'
+      ? 'border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 to-zinc-900 text-emerald-100'
+      : 'border-red-500/40 bg-gradient-to-br from-red-500/15 to-zinc-900 text-red-100'
+  const Icon = tone === 'positive' ? Trophy : ShieldAlert
+  return (
+    <div className={`rounded-lg border ${cls} p-4 flex gap-3`}>
+      <Icon
+        className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
+          tone === 'positive' ? 'text-emerald-300' : 'text-red-300'
+        }`}
+      />
+      <div>
+        <div
+          className={`text-[10px] uppercase tracking-widest font-bold mb-1 ${
+            tone === 'positive' ? 'text-emerald-300' : 'text-red-300'
+          }`}
+        >
+          {title}
+        </div>
+        <p className="text-sm leading-snug">{body}</p>
+      </div>
+    </div>
+  )
+}
+
+interface CatalystTableProps {
+  rows: CatalystBreakdown[]
+}
+
+function CatalystTable({ rows }: CatalystTableProps) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-zinc-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+            <th className="text-left font-semibold px-3 py-2">Strategy</th>
+            <th className="text-right font-semibold px-3 py-2">Trades</th>
+            <th className="text-right font-semibold px-3 py-2">Win Rate</th>
+            <th className="text-right font-semibold px-3 py-2">W / L</th>
+            <th className="text-right font-semibold px-3 py-2">Net P/L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const isUntagged = r.catalyst === UNTAGGED_KEY
+            return (
+              <tr
+                key={r.catalyst}
+                className={`border-b border-zinc-900 last:border-0 ${
+                  isUntagged ? 'opacity-60' : ''
+                }`}
+              >
+                <td className="px-3 py-2">
+                  <span
+                    className={`text-sm ${
+                      isUntagged
+                        ? 'text-zinc-500 italic'
+                        : 'text-zinc-200 font-medium'
+                    }`}
+                  >
+                    {r.catalyst}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
+                  {r.count}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">
+                  <span
+                    className={
+                      r.winRate >= 50
+                        ? 'text-emerald-300'
+                        : r.winRate >= 33
+                        ? 'text-amber-300'
+                        : 'text-red-300'
+                    }
+                  >
+                    {r.winRate.toFixed(0)}%
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-zinc-400">
+                  {r.wins} / {r.losses}
+                </td>
+                <td
+                  className={`px-3 py-2 text-right font-mono tabular-nums font-semibold ${profitColorClass(
+                    r.net
+                  )}`}
+                >
+                  {r.net >= 0 ? '+' : ''}
+                  {formatUSD(r.net)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }

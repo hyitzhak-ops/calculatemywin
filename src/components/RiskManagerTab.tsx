@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Target,
   Plus,
@@ -8,6 +8,9 @@ import {
   History,
   AlertTriangle,
   Trash2,
+  Calculator,
+  ShieldAlert,
+  Crosshair,
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
 import { Field } from './ui/Field'
@@ -18,7 +21,8 @@ import {
   profitColorClass,
   formatDateTime,
 } from '../utils/format'
-import type { ActiveTrade } from '../types'
+import type { ActiveTrade, TradeCatalyst } from '../types'
+import { TRADE_CATALYSTS } from '../types'
 
 const TARGET_TIERS = [0.05, 0.1, 0.15, 0.2] as const
 
@@ -66,7 +70,7 @@ export function RiskManagerTab() {
                 key={t.id}
                 trade={t}
                 onRemove={() => removeActiveTrade(t.id)}
-                onClose={(sell) => closeTrade(t.id, sell)}
+                onClose={(sell, catalyst) => closeTrade(t.id, sell, catalyst)}
               />
             ))}
           </div>
@@ -327,30 +331,101 @@ interface AddTradeFormProps {
 function AddTradeForm({ onAdd }: AddTradeFormProps) {
   const [open, setOpen] = useState(false)
   const [symbol, setSymbol] = useState('')
-  const [shares, setShares] = useState('')
   const [buyPrice, setBuyPrice] = useState('')
+  const [stopLoss, setStopLoss] = useState('')
+  const [maxRisk, setMaxRisk] = useState('')
+  const [shares, setShares] = useState('')
+  const [sharesManuallyEdited, setSharesManuallyEdited] = useState(false)
 
   const reset = () => {
     setSymbol('')
-    setShares('')
     setBuyPrice('')
+    setStopLoss('')
+    setMaxRisk('')
+    setShares('')
+    setSharesManuallyEdited(false)
   }
 
-  const validShares = parseFloat(shares)
-  const validBuy = parseFloat(buyPrice)
+  const buyNum = parseFloat(buyPrice)
+  const stopNum = parseFloat(stopLoss)
+  const riskNum = parseFloat(maxRisk)
+  const sharesNum = parseFloat(shares)
+
+  const buyValid = Number.isFinite(buyNum) && buyNum > 0
+  const stopValid = Number.isFinite(stopNum) && stopNum > 0
+  const riskValid = Number.isFinite(riskNum) && riskNum > 0
+
+  const stopBelowBuy = buyValid && stopValid && stopNum < buyNum
+  const stopInvalidForLong = buyValid && stopValid && !stopBelowBuy
+
+  // The "perfect" share count derived from risk budget. We re-derive every
+  // render — the form just exposes it; the user can still override.
+  const recommendedShares = useMemo(() => {
+    if (!buyValid || !stopValid || !riskValid) return null
+    if (!stopBelowBuy) return null
+    const perShareRisk = buyNum - stopNum
+    if (perShareRisk <= 0) return null
+    return Math.floor(riskNum / perShareRisk)
+  }, [buyValid, stopValid, riskValid, stopBelowBuy, buyNum, stopNum, riskNum])
+
+  // Auto-populate the shares field from the recommendation, but never
+  // overwrite a value the user typed manually.
+  useEffect(() => {
+    if (sharesManuallyEdited) return
+    if (recommendedShares == null) return
+    setShares(recommendedShares.toString())
+  }, [recommendedShares, sharesManuallyEdited])
+
+  const handleSharesChange = (val: string) => {
+    setShares(val)
+    setSharesManuallyEdited(true)
+  }
+
+  const handleResetShares = () => {
+    setSharesManuallyEdited(false)
+    if (recommendedShares != null) {
+      setShares(recommendedShares.toString())
+    } else {
+      setShares('')
+    }
+  }
+
+  // When the user clicks "Use this" on a scenario tier, write the price into
+  // the Stop-Loss field with two-decimal precision. Re-enable share auto-fill
+  // so the recommendation refreshes from the new tier instantly.
+  const handleApplyScenarioStop = (scenarioPrice: number) => {
+    setStopLoss(scenarioPrice.toFixed(2))
+    setSharesManuallyEdited(false)
+  }
+
+  const totalCapital =
+    Number.isFinite(sharesNum) && sharesNum > 0 && buyValid
+      ? sharesNum * buyNum
+      : null
+
+  const realizedRiskAtStop =
+    Number.isFinite(sharesNum) &&
+    sharesNum > 0 &&
+    buyValid &&
+    stopValid &&
+    stopBelowBuy
+      ? (buyNum - stopNum) * sharesNum
+      : null
+
   const canSubmit =
     symbol.trim().length > 0 &&
-    Number.isFinite(validShares) &&
-    validShares > 0 &&
-    Number.isFinite(validBuy) &&
-    validBuy > 0
+    buyValid &&
+    Number.isFinite(sharesNum) &&
+    sharesNum > 0
 
   const handleSubmit = () => {
     if (!canSubmit) return
     onAdd({
       symbol: symbol.trim().toUpperCase(),
-      shares: validShares,
-      buyPrice: validBuy,
+      shares: sharesNum,
+      buyPrice: buyNum,
+      ...(stopValid && stopBelowBuy ? { stopLoss: stopNum } : {}),
+      ...(riskValid ? { riskBudget: riskNum } : {}),
     })
     reset()
     setOpen(false)
@@ -370,8 +445,8 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
 
   return (
     <Panel
-      title="New Active Trade"
-      subtitle="Open a position you'll track to a target"
+      title="New Active Trade · Risk-Based Sizing"
+      subtitle="Enter your stop-loss and max account risk — share count is auto-calculated"
       action={
         <button
           onClick={() => {
@@ -384,33 +459,108 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
         </button>
       }
     >
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Field
-          label="Symbol"
-          placeholder="AAPL"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-        />
-        <Field
-          label="Number of Shares"
-          type="number"
-          step="1"
-          min="0"
-          placeholder="0"
-          value={shares}
-          onChange={(e) => setShares(e.target.value)}
-        />
-        <Field
-          label="Buy Price"
-          prefix="$"
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="0.00"
-          value={buyPrice}
-          onChange={(e) => setBuyPrice(e.target.value)}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field
+              label="Symbol"
+              placeholder="AAPL"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            />
+            <Field
+              label="Buy Price (Entry)"
+              prefix="$"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={buyPrice}
+              onChange={(e) => setBuyPrice(e.target.value)}
+            />
+            <div>
+              <Field
+                label="Stop-Loss Price"
+                prefix="$"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+              />
+              {stopInvalidForLong && (
+                <p className="mt-1 text-[11px] text-red-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Stop-loss must be below buy price
+                </p>
+              )}
+            </div>
+            <Field
+              label="Max Account Risk"
+              prefix="$"
+              type="number"
+              step="10"
+              min="0"
+              placeholder="150"
+              value={maxRisk}
+              onChange={(e) => setMaxRisk(e.target.value)}
+            />
+          </div>
+
+          <StopLossScenarioMatrix
+            symbol={symbol.trim()}
+            buyPrice={buyValid ? buyNum : null}
+            maxRisk={riskValid ? riskNum : null}
+            currentStopLoss={stopValid && stopBelowBuy ? stopNum : null}
+            onApply={handleApplyScenarioStop}
+          />
+
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label className="block text-xs font-medium text-zinc-400">
+                Number of Shares
+              </label>
+              {sharesManuallyEdited && recommendedShares != null && (
+                <button
+                  type="button"
+                  onClick={handleResetShares}
+                  className="text-[11px] text-zinc-500 hover:text-emerald-300 transition"
+                >
+                  Reset to recommended ({recommendedShares})
+                </button>
+              )}
+            </div>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              placeholder={
+                recommendedShares != null
+                  ? `Recommended ${recommendedShares}`
+                  : '0'
+              }
+              value={shares}
+              onChange={(e) => handleSharesChange(e.target.value)}
+              className="w-full rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 font-mono tabular-nums placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            />
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Auto-filled from risk math. You can override — we'll keep your
+              value.
+            </p>
+          </div>
+        </div>
+
+        <RiskSizingPanel
+          recommendedShares={recommendedShares}
+          totalCapital={totalCapital}
+          realizedRiskAtStop={realizedRiskAtStop}
+          maxRisk={riskValid ? riskNum : null}
+          buyPrice={buyValid ? buyNum : null}
+          stopLoss={stopValid && stopBelowBuy ? stopNum : null}
         />
       </div>
+
       <div className="mt-4 flex justify-end">
         <button
           onClick={handleSubmit}
@@ -425,15 +575,285 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
   )
 }
 
+interface RiskSizingPanelProps {
+  recommendedShares: number | null
+  totalCapital: number | null
+  realizedRiskAtStop: number | null
+  maxRisk: number | null
+  buyPrice: number | null
+  stopLoss: number | null
+}
+
+function RiskSizingPanel({
+  recommendedShares,
+  totalCapital,
+  realizedRiskAtStop,
+  maxRisk,
+  buyPrice,
+  stopLoss,
+}: RiskSizingPanelProps) {
+  const ready = recommendedShares != null && totalCapital != null
+
+  const perShareRisk =
+    buyPrice != null && stopLoss != null ? buyPrice - stopLoss : null
+
+  // Show the "buffer" between budgeted risk and the risk you'd actually take
+  // after rounding shares down — usually a few dollars under budget.
+  const riskBuffer =
+    maxRisk != null && realizedRiskAtStop != null
+      ? maxRisk - realizedRiskAtStop
+      : null
+
+  return (
+    <div className="rounded-md border border-emerald-500/25 bg-emerald-500/5 p-3 flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Calculator className="w-4 h-4 text-emerald-300" />
+        <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-200">
+          Recommended Position Size
+        </span>
+      </div>
+
+      {!ready ? (
+        <div className="flex items-start gap-2 text-xs text-zinc-400">
+          <ShieldAlert className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0" />
+          <p className="leading-snug">
+            Enter <span className="text-zinc-200">Buy Price</span>,{' '}
+            <span className="text-zinc-200">Stop-Loss</span>, and{' '}
+            <span className="text-zinc-200">Max Account Risk</span> to see the
+            scientifically correct share count.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
+              Shares
+            </div>
+            <div className="text-3xl font-mono tabular-nums font-bold text-emerald-200 leading-tight">
+              {recommendedShares}
+            </div>
+            {perShareRisk != null && (
+              <div className="mt-0.5 text-[11px] text-emerald-200/70 font-mono tabular-nums">
+                Risk per share: {formatUSD(perShareRisk)}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-md border border-zinc-700 bg-zinc-950/60 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              Total Capital Required
+            </div>
+            <div className="text-xl font-mono tabular-nums text-zinc-100">
+              {formatUSD(totalCapital!)}
+            </div>
+            <div className="mt-0.5 text-[11px] text-zinc-500 font-mono tabular-nums">
+              {recommendedShares} sh × {formatUSD(buyPrice!)}
+            </div>
+          </div>
+
+          {realizedRiskAtStop != null && (
+            <div className="text-[11px] text-zinc-400 leading-snug">
+              <div className="flex items-center justify-between gap-2 font-mono tabular-nums">
+                <span>If stop hits:</span>
+                <span className="text-red-300 font-semibold">
+                  −{formatUSD(realizedRiskAtStop)}
+                </span>
+              </div>
+              {riskBuffer != null && riskBuffer >= 0 && (
+                <div className="flex items-center justify-between gap-2 font-mono tabular-nums text-zinc-500">
+                  <span>Under budget by:</span>
+                  <span>{formatUSD(riskBuffer)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+interface StopLossScenarioMatrixProps {
+  symbol: string
+  buyPrice: number | null
+  maxRisk: number | null
+  currentStopLoss: number | null
+  onApply: (scenarioStopPrice: number) => void
+}
+
+const SCENARIO_TIERS = [0.05, 0.1, 0.15, 0.2] as const
+
+interface ScenarioRow {
+  pct: number
+  stopPrice: number
+  riskPerShare: number
+  recommendedShares: number | null
+  capitalRequired: number | null
+  matchesCurrent: boolean
+}
+
+function StopLossScenarioMatrix({
+  symbol,
+  buyPrice,
+  maxRisk,
+  currentStopLoss,
+  onApply,
+}: StopLossScenarioMatrixProps) {
+  // Show only when the user has typed both Symbol and a usable Buy Price.
+  // (Stop-loss tiers are meaningless without an entry anchor.)
+  const ready = symbol.length > 0 && buyPrice != null && buyPrice > 0
+
+  const rows = useMemo<ScenarioRow[]>(() => {
+    if (!ready || buyPrice == null) return []
+    return SCENARIO_TIERS.map((pct) => {
+      const stopPrice = buyPrice * (1 - pct)
+      const riskPerShare = buyPrice - stopPrice
+      const recommendedShares =
+        maxRisk != null && maxRisk > 0 && riskPerShare > 0
+          ? Math.floor(maxRisk / riskPerShare)
+          : null
+      const capitalRequired =
+        recommendedShares != null ? recommendedShares * buyPrice : null
+      // "Match" means the user's current stop is within 1¢ of this tier — used
+      // to highlight which scenario is currently armed.
+      const matchesCurrent =
+        currentStopLoss != null &&
+        Math.abs(currentStopLoss - stopPrice) < 0.005
+      return {
+        pct,
+        stopPrice,
+        riskPerShare,
+        recommendedShares,
+        capitalRequired,
+        matchesCurrent,
+      }
+    })
+  }, [ready, buyPrice, maxRisk, currentStopLoss])
+
+  if (!ready) {
+    return (
+      <div className="rounded-md border border-dashed border-zinc-800 bg-slate-950/30 px-4 py-3 text-[11px] text-zinc-500 flex items-center gap-2">
+        <Crosshair className="w-3.5 h-3.5 text-zinc-600" />
+        Enter <span className="text-zinc-400">Symbol</span> &{' '}
+        <span className="text-zinc-400">Buy Price</span> to preview stop-loss
+        scenarios.
+      </div>
+    )
+  }
+
+  const showSharesCol = maxRisk != null && maxRisk > 0
+
+  return (
+    <div className="rounded-md border border-zinc-800 bg-slate-950/40 overflow-hidden">
+      <div className="px-3 py-2 border-b border-zinc-800/80 flex items-center gap-2 bg-slate-900/40">
+        <Crosshair className="w-3.5 h-3.5 text-slate-400" />
+        <span className="text-[10px] uppercase tracking-wider font-bold text-slate-300">
+          Stop-Loss Scenario Matrix
+        </span>
+        <span className="text-[10px] text-slate-500 font-normal normal-case">
+          · planning preview · click{' '}
+          <span className="text-emerald-400/80">Use this</span> to arm a tier
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-zinc-800/60">
+              <th className="text-left font-semibold px-3 py-1.5">Drop</th>
+              <th className="text-right font-semibold px-3 py-1.5">
+                Stop Price
+              </th>
+              <th className="text-right font-semibold px-3 py-1.5">$/share</th>
+              {showSharesCol && (
+                <>
+                  <th className="text-right font-semibold px-3 py-1.5">
+                    Shares
+                  </th>
+                  <th className="text-right font-semibold px-3 py-1.5">
+                    Capital
+                  </th>
+                </>
+              )}
+              <th className="px-3 py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.pct}
+                className={`border-b border-zinc-900 last:border-0 transition ${
+                  r.matchesCurrent
+                    ? 'bg-emerald-500/5'
+                    : 'hover:bg-zinc-900/40'
+                }`}
+              >
+                <td className="px-3 py-1.5">
+                  <span
+                    className={`font-mono tabular-nums ${
+                      r.matchesCurrent
+                        ? 'text-emerald-300 font-semibold'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    −{(r.pct * 100).toFixed(0)}%
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-200">
+                  {formatUSD(r.stopPrice)}
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-400">
+                  {formatUSD(r.riskPerShare)}
+                </td>
+                {showSharesCol && (
+                  <>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-200">
+                      {r.recommendedShares ?? '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-400">
+                      {r.capitalRequired != null
+                        ? formatUSD(r.capitalRequired)
+                        : '—'}
+                    </td>
+                  </>
+                )}
+                <td className="px-3 py-1.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onApply(r.stopPrice)}
+                    className={`text-[10px] font-medium px-2 py-0.5 rounded border transition ${
+                      r.matchesCurrent
+                        ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-200'
+                        : 'border-zinc-700 bg-zinc-900/60 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'
+                    }`}
+                  >
+                    {r.matchesCurrent ? 'Armed' : 'Use this'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!showSharesCol && (
+        <div className="px-3 py-1.5 text-[10px] text-slate-500 bg-slate-950/60 border-t border-zinc-800/60">
+          Add a <span className="text-slate-300">Max Account Risk</span> value
+          to see recommended shares and capital required for each tier.
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface ActiveTradeCardProps {
   trade: ActiveTrade
   onRemove: () => void
-  onClose: (sellPrice: number) => unknown
+  onClose: (sellPrice: number, catalyst?: TradeCatalyst) => unknown
 }
 
 function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
   const [closing, setClosing] = useState(false)
   const [sellInput, setSellInput] = useState('')
+  const [catalyst, setCatalyst] = useState<TradeCatalyst | ''>('')
 
   const profitTiers = useMemo(
     () =>
@@ -466,8 +886,9 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
 
   const handleConfirm = () => {
     if (!Number.isFinite(liveSell) || liveSell <= 0) return
-    onClose(liveSell)
+    onClose(liveSell, catalyst || undefined)
     setSellInput('')
+    setCatalyst('')
     setClosing(false)
   }
 
@@ -486,6 +907,13 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
               {trade.shares} sh @ {formatUSD(trade.buyPrice)} ·{' '}
               {formatUSD(cost)} cost
             </div>
+            {trade.stopLoss !== undefined && (
+              <div className="text-[11px] text-red-300/80 font-mono mt-0.5 flex items-center gap-1.5">
+                <ShieldAlert className="w-3 h-3" />
+                Planned stop {formatUSD(trade.stopLoss)} · risk{' '}
+                {formatUSD((trade.buyPrice - trade.stopLoss) * trade.shares)}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -599,7 +1027,7 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
 
         {closing && (
           <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-3 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
               <Field
                 label="Actual Sell Price"
                 prefix="$"
@@ -611,21 +1039,44 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
                 onChange={(e) => setSellInput(e.target.value)}
                 autoFocus
               />
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  Trade Strategy / Catalyst{' '}
+                  <span className="text-zinc-600">(optional)</span>
+                </label>
+                <select
+                  value={catalyst}
+                  onChange={(e) =>
+                    setCatalyst(e.target.value as TradeCatalyst | '')
+                  }
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+                >
+                  <option value="">— Untagged —</option>
+                  {TRADE_CATALYSTS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setSellInput('')
+                  setCatalyst('')
+                  setClosing(false)
+                }}
+                className="rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-sm px-3 py-2 transition"
+              >
+                Cancel
+              </button>
               <button
                 onClick={handleConfirm}
                 disabled={!Number.isFinite(liveSell) || liveSell <= 0}
                 className="rounded-md bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed text-zinc-950 text-sm font-medium px-4 py-2 transition"
               >
                 Confirm Sale
-              </button>
-              <button
-                onClick={() => {
-                  setSellInput('')
-                  setClosing(false)
-                }}
-                className="rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-sm px-3 py-2 transition"
-              >
-                Cancel
               </button>
             </div>
             {livePreview !== null && (

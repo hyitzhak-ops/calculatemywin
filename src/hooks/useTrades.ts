@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ActiveTrade, CompletedTrade, DailyGoal } from '../types'
+import type {
+  ActiveTrade,
+  CompletedTrade,
+  DailyGoal,
+  TradeCatalyst,
+} from '../types'
 
 const ACTIVE_KEY = 'calculatemywin_active_trades'
 const COMPLETED_KEY = 'calculatemywin_completed_trades'
@@ -76,7 +81,11 @@ export function useTrades() {
     })
   }
 
-  const closeTrade = (id: string, sellPrice: number) => {
+  const closeTrade = (
+    id: string,
+    sellPrice: number,
+    catalyst?: TradeCatalyst
+  ) => {
     let closed: CompletedTrade | null = null
     setActiveTrades((prev) => {
       const trade = prev.find((t) => t.id === id)
@@ -89,6 +98,7 @@ export function useTrades() {
         sellPrice,
         profitUSD: (sellPrice - trade.buyPrice) * trade.shares,
         timestamp: Date.now(),
+        ...(catalyst ? { catalyst } : {}),
       }
       const next = prev.filter((t) => t.id !== id)
       persist(ACTIVE_KEY, next)

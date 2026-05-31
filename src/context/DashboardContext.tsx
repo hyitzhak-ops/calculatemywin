@@ -13,6 +13,7 @@ import type {
   CompletedTrade,
   DailyGoal,
   DailyJournalNote,
+  TradeCatalyst,
 } from '../types'
 import { fetchStockData, POLL_MS } from '../services/stockService'
 import { useTrades } from '../hooks/useTrades'
@@ -41,7 +42,11 @@ interface DashboardContextValue {
     input: Omit<ActiveTrade, 'id' | 'timestamp'>
   ) => ActiveTrade
   removeActiveTrade: (id: string) => void
-  closeTrade: (id: string, sellPrice: number) => CompletedTrade | null
+  closeTrade: (
+    id: string,
+    sellPrice: number,
+    catalyst?: TradeCatalyst
+  ) => CompletedTrade | null
   clearCompletedTrades: () => void
   addCompletedTrade: (input: Omit<CompletedTrade, 'id'>) => CompletedTrade
   updateCompletedTrade: (
@@ -77,6 +82,7 @@ function createEmptyTicker(inputSymbol = ''): Ticker {
     loading: false,
     error: null,
     lastUpdated: null,
+    overlay: [],
   }
 }
 
@@ -119,6 +125,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                 quote: result.quote,
                 chart: result.chart,
                 source: result.source,
+                overlay: result.overlay,
                 loading: false,
                 lastUpdated: Date.now(),
               }

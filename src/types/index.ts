@@ -17,6 +17,15 @@ export interface StockQuote {
   open: number
   previousClose: number
   isMock: boolean
+  preMarketHigh?: number
+  preMarketLow?: number
+  gapDollar?: number
+  gapPercent?: number
+}
+
+export interface OverlayPoint {
+  timestamp: number
+  pctChange: number  // % change vs first point in series
 }
 
 export interface Ticker {
@@ -30,6 +39,7 @@ export interface Ticker {
   loading: boolean
   error: string | null
   lastUpdated: number | null
+  overlay: OverlayPoint[]   // SPY (or QQQ) %-change series, aligned to chart timeframe
 }
 
 export interface ActiveTrade {
@@ -38,7 +48,19 @@ export interface ActiveTrade {
   shares: number
   buyPrice: number
   timestamp: number
+  stopLoss?: number       // planned stop-loss price (long position: stopLoss < buyPrice)
+  riskBudget?: number     // dollar amount the trader was willing to lose at entry
 }
+
+export const TRADE_CATALYSTS = [
+  'Pre-market Gainer',
+  'Earnings Report',
+  'Support Bounce',
+  'FOMO / Emotional',
+  'Other',
+] as const
+
+export type TradeCatalyst = (typeof TRADE_CATALYSTS)[number]
 
 export interface CompletedTrade {
   id: string
@@ -48,6 +70,7 @@ export interface CompletedTrade {
   sellPrice: number
   profitUSD: number
   timestamp: number
+  catalyst?: TradeCatalyst
 }
 
 export interface DailyGoal {
