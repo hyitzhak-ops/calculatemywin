@@ -56,6 +56,48 @@ Risk-based position sizing console with scenario planning, paired profit/stop-lo
 - `+$X over goal` chip + `well above max` pill when applicable
 - Down-day advisory banner when net negative
 
+### Corporate Risk Assessment Scanner (NEW)
+
+Automated fundamental risk scanner that fires as you type a symbol in the "+ Add Position" form:
+
+**How it works:**
+- Debounced scan (600ms) against Finnhub's `/company-news`, `/stock/split`, and `/calendar/earnings` endpoints
+- Uses `Promise.allSettled` so partial API failures still surface whatever data succeeded
+- `AbortController` cancels in-flight requests when the symbol changes
+
+**Risk Vectors Scanned:**
+
+| Vector | Lookback / Lookahead | Keywords / Data | Score Delta |
+|--------|---------------------|------------------|-------------|
+| **A: Share Dilution / Toxic Financing** | 60 days back | `Offering`, `S-3`, `F-3`, `Prospectus`, `ATM`, `Convertible Note`, `Private Placement`, `PIPE`, `Warrant`. Distinguishes institutional deals (hedge-fund convertibles) from public offerings. | +4 pts (≤14d), +2 pts (older) |
+| **B: Reverse Split Risk** | −30d / +7d | Splits calendar + headline fallback for scheduled or recently executed reverse splits. Parses `1-for-N` ratios, flags NASDAQ listing-compliance triggers. | +5 pts |
+| **C: Earnings Proximity** | −14d / +120d | +3 pts if earnings within 3 trading days (with BMO/AMC session label). Informational flag for recently-reported earnings (≤14d) with EPS beat/miss surprise. | +3 pts (imminent), +1 pt (miss) |
+
+**Risk Score (1–10 scale) & Severity:**
+
+| Score | Severity | Visual Treatment |
+|-------|----------|------------------|
+| 1–2   | Low      | Clean emerald badge · `ShieldCheck` icon · green border |
+| 3     | Medium   | Amber warning badge · `AlertTriangle` icon · amber border |
+| 4–6   | High     | Orange `Siren` icon · elevated sell-pressure warning · orange border + ring |
+| 7–10  | **Toxic** | **Flashing red border pulse** (`animate-toxic-pulse` keyframe) · `⚠️ TOXIC CAPITAL STRUCTURE DETECTED` badge · explicit summary: *"Heavy sell pressure expected. This is a dangerous vehicle for swing exposure."* |
+
+**Per-Flag Detail Rows:**
+- Title (e.g., `Active Dilution / Toxic Financing`, `Imminent Reverse Split`)
+- Detail string with source/date context (e.g., *"Institutional deal (likely PIPE) · 'XYZ files $50M offering' (Reuters, 5d ago)"*)
+- Score delta (`+4 pts`), days-ago/days-until metadata, external source link when available (`<ExternalLink>` icon)
+
+**Fault-Tolerant Design:**
+- Without a Finnhub API key: renders a non-blocking "scanner offline" notice; form submission remains fully available
+- Partial scan badge + errors array shown when one or more endpoints fail
+- **Purely advisory** — the scanner **never blocks** order entry. Explicit footer: *"Advisory only — execution remains in your control. Flags do not block order entry."*
+
+**Visual Components:**
+- Loading skeleton with spinner + animated pulse rectangles during initial scan
+- Subtle inline `Loader2` spinner during refreshes
+- Gradient risk meter bar (0–100% fill, color-coded by severity)
+- Flashing red `animate-toxic-pulse` keyframe for toxic-tier scores (red box-shadow ring + intensifying border at 50%, 1.6s loop)
+
 ### Add Position Form — Risk-Based Sizing
 
 **Form fields:** Symbol · Buy Price (Entry) · Stop-Loss Price · Max Account Risk · Shares
@@ -197,13 +239,14 @@ Strategy attribution & insight callouts:
 src/
 ├── App.tsx                         # Provider wrapper · listens for backup-restore · purges legacy storage keys
 ├── main.tsx
-├── index.css                       # Tailwind import + equityFadeIn + volatilityPulse keyframes
+├── index.css                       # Tailwind import + equityFadeIn + volatilityPulse + toxicPulse keyframes
 ├── types/index.ts                  # All shared TS interfaces · TRADE_CATALYSTS const · OverlayPoint
 ├── utils/
 │   ├── format.ts                   # USD/percent/color/date helpers
 │   └── backup.ts                   # buildBackupPayload · exportBackupToFile · validateBackup · applyBackup · readBackupFile · purgeLegacyStorageKeys
 ├── services/
-│   └── stockService.ts             # Finnhub + Yahoo + mock fallback chain · pre-market parsing (NY tz) · fetchOverlay (SPY)
+│   ├── stockService.ts             # Finnhub + Yahoo + mock fallback chain · pre-market parsing (NY tz) · fetchOverlay (SPY)
+│   └── riskScannerService.ts       # Corporate risk scanner · dilution/reverse-split/earnings vectors · score calc · RiskScanResult
 ├── hooks/
 │   ├── useTrades.ts                # activeTrades · completedTrades · dailyGoal · addCompletedTrade · updateCompletedTrade · deleteCompletedTrade · closeTrade(catalyst)
 │   ├── useJournal.ts               # dailyJournalNotes
@@ -216,7 +259,7 @@ src/
     ├── Dashboard.tsx               # Header, sticky tab switcher, layout
     ├── BackupControls.tsx          # Export/Import buttons (header + panel variants)
     ├── TickerGrid.tsx · StockTickerPanel.tsx · PriceChart.tsx
-    ├── RiskManagerTab.tsx          # Risk-based sizing form + scenario matrix + active positions + closed table
+    ├── RiskManagerTab.tsx          # Corporate risk scanner + risk-based sizing + scenario matrix + active positions + closed table
     ├── JournalReportsTab.tsx       # Calendar + Gold Stats + Edge Finder + Historical form + Range report + Daily modal
     └── EquityCurveChart.tsx        # Equity curve + drawdown stats
 ```
@@ -269,6 +312,7 @@ A legacy raw-JSON shape (without the wrapping `version` / `data` envelope) is al
 - **Reactive cascade** — every consumer derives off `completedTrades` with `useMemo`, so a single state update propagates to calendar, chart, goal banner, Gold Stats, Edge Finder, and range report on the next render
 - **Confirmation before destructive actions** — deleting a trade prompts "Are you sure? This will recalculate all historical reports."
 - **Honest data only** — features that would require paid market-data APIs (RVOL, market-wide scanner) were deliberately *not* built rather than fake numbers a trader might act on
+- **Corporate risk scanner degrades gracefully** — uses `Promise.allSettled` so one failed endpoint doesn't block the others. Without an API key, shows an offline notice but never blocks form submission. The scanner is purely advisory.
 
 ---
 

@@ -59,7 +59,27 @@ Goal-tracking, risk-based position sizing, active trade management, and per-trad
 - **Goal-reached celebration banner** — high-visibility milestone when `dailyProfit ≥ goal.min`. Explicitly **non-blocking** — every input, button, and table stays fully operational past the goal. Live chips show `+$X over goal` and `well above max` when applicable.
 - **Down-day advisory** — gentle red banner if you're net negative for the day
 
-#### Risk-Based Position Sizing (New)
+#### Corporate Risk Assessment Scanner (NEW — Fundamental Pre-Trade Guard)
+Before you enter a position, the "+ Add Position" form now automatically scans for **toxic capital structures** and catalyst hazards:
+
+- **Debounced real-time scanning** — as you type a symbol, a 600ms-debounced scan fires against Finnhub endpoints:
+  - **Vector A — Share Dilution / Toxic Financing** (60-day lookback): company news scanned for keywords `Offering`, `S-3`, `F-3`, `Prospectus`, `ATM`, `Convertible Note`, `Private Placement`, `PIPE`, `Warrant`. Distinguishes institutional deals (hedge-fund convertibles) from public offerings. **+4 pts** when ≤14d, **+2 pts** when older.
+  - **Vector B — Reverse Split Risk** (−30d / +7d): splits calendar + headline fallback for scheduled or recently executed reverse splits. Parses `1-for-N` ratios, flags NASDAQ listing-compliance triggers. **+5 pts**.
+  - **Vector C — Earnings Proximity** (+120d forward, −14d back): **+3 pts** if earnings within 3 trading days (with BMO/AMC session label). Informational flag for recently-reported earnings (≤14d) with EPS beat/miss surprise.
+- **Dynamic Risk Score (1–10 scale)** with color-coded severity:
+  - **1–2 (Low)** — clean emerald badge, `ShieldCheck` icon
+  - **3 (Medium)** — amber warning badge, `AlertTriangle` icon
+  - **4–6 (High)** — orange `Siren` icon, elevated sell-pressure warning
+  - **7–10 (Toxic)** — flashing red border pulse (`animate-toxic-pulse`), `⚠️ TOXIC CAPITAL STRUCTURE DETECTED` badge, explicit summary: *"Heavy sell pressure expected. This is a dangerous vehicle for swing exposure."*
+- **Per-flag detail rows** — each active flag shows:
+  - Title (e.g., `Active Dilution / Toxic Financing`)
+  - Detail string with source/date context (e.g., *"Institutional deal (likely PIPE) · 'XYZ files $50M offering' (Reuters, 5d ago)"*)
+  - Score delta (`+4 pts`), days-ago/days-until metadata, external source link when available
+- **Fault-tolerant by design** — uses `Promise.allSettled` so partial API failures still surface whatever data succeeded. Panel shows `partial scan` badge + errors array when applicable. Without a Finnhub key, renders a non-blocking offline notice; form submission remains fully available.
+- **Purely advisory** — the scanner **never blocks** order entry. Explicit footer: *"Advisory only — execution remains in your control. Flags do not block order entry."*
+- **Visual treatment** — loading skeleton with spinner during scan, gradient risk meter bar, flashing red pulse animation for toxic-tier scores
+
+#### Risk-Based Position Sizing
 The "+ Add Position" form is upgraded into a complete risk-management console:
 
 - **Form fields:** Symbol · Buy Price (Entry) · Stop-Loss Price · Max Account Risk · Shares
@@ -188,13 +208,14 @@ A legacy raw-JSON shape (without the `version`/`data` envelope) is also accepted
 src/
 ├── App.tsx                         # Provider wrapper · listens for backup-restore · purges legacy keys
 ├── main.tsx
-├── index.css                       # Tailwind import + chart fade-in + volatility-pulse keyframes
+├── index.css                       # Tailwind import + chart fade-in + volatility-pulse + toxic-pulse keyframes
 ├── types/index.ts                  # All shared TS interfaces · TRADE_CATALYSTS const
 ├── utils/
 │   ├── format.ts                   # USD / percent / color / date helpers
 │   └── backup.ts                   # Export / validate / apply / read-file · purgeLegacyStorageKeys
 ├── services/
-│   └── stockService.ts             # Finnhub + Yahoo + mock fallback · pre-market parsing · SPY overlay
+│   ├── stockService.ts             # Finnhub + Yahoo + mock fallback · pre-market parsing · SPY overlay
+│   └── riskScannerService.ts       # Corporate risk scanner · dilution/reverse-split/earnings vectors · score calc
 ├── hooks/
 │   ├── useTrades.ts                # Active + completed + daily goal + add/update/delete with catalyst
 │   ├── useJournal.ts               # Daily journal notes
@@ -209,7 +230,7 @@ src/
     ├── TickerGrid.tsx              # Multi-ticker grid
     ├── StockTickerPanel.tsx        # Per-ticker quote + Gap/Pre-Mkt pills + chart + volatility flash
     ├── PriceChart.tsx              # ComposedChart · pre-market reference lines · SPY overlay
-    ├── RiskManagerTab.tsx          # Risk-based sizing + scenario matrix + active positions + closed table
+    ├── RiskManagerTab.tsx          # Corporate risk scanner + risk-based sizing + scenario matrix + active positions + closed table
     ├── JournalReportsTab.tsx       # Calendar + Gold Stats + Edge Finder + historical form + range report
     └── EquityCurveChart.tsx        # Equity curve + drawdown stats
 ```
@@ -226,7 +247,7 @@ npm install
 
 ### Optional: Finnhub API key
 
-For higher-quality live quotes, copy the env template:
+For higher-quality live quotes **and to enable the Corporate Risk Scanner**, copy the env template:
 
 ```bash
 cp .env.example .env
@@ -238,7 +259,7 @@ then add your free key from [finnhub.io](https://finnhub.io/):
 VITE_FINNHUB_API_KEY=your_key_here
 ```
 
-The app **works perfectly without it** — Yahoo Finance is the next fallback, then deterministic demo data.
+The app **works perfectly without it** — Yahoo Finance is the next fallback for quotes/charts, and the risk scanner displays a non-blocking "offline" notice. Demo data is the final fallback for price charts.
 
 ### Run
 
@@ -289,6 +310,7 @@ The validator only writes sections whose shape it recognizes, so a partial or ol
 - **Reactive cascade** — every consumer (calendar, chart, goal banner, Gold Stats, Edge Finder, range report) derives off `completedTrades` with `useMemo`, so a single state update propagates everywhere on the next render
 - **Confirmation before destructive actions** — deleting a trade prompts "Are you sure? This will recalculate all historical reports."
 - **Honest data only** — features that would require paid market-data APIs (RVOL, scanner endpoints) were deliberately *not* built rather than mock fake numbers a trader might act on
+- **Corporate risk scanner degrades gracefully** — uses `Promise.allSettled` so one failed endpoint doesn't block the others. Without an API key, shows an offline notice but never blocks form submission. The scanner is purely advisory; it surfaces hazards but execution stays in the user's control.
 
 ---
 

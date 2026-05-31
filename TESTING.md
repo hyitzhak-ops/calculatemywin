@@ -84,10 +84,51 @@ Manual smoke tests covering every tab and feature. Use after any meaningful chan
 - [ ] If you keep closing winning trades, the live total continues to grow past $2,000
 - [ ] When `dailyProfit < 0` and goal not reached, the red down-day advisory shows
 
+### Corporate Risk Assessment Scanner
+
+#### Scanner Activation
+- [ ] When the "+ Add Position" form opens, typing a symbol triggers the scanner (600ms debounce)
+- [ ] Loading skeleton appears: spinner + animated pulse rectangles
+- [ ] After ~1s, the Corporate Risk Assessment panel appears above the entry fields
+
+#### Risk Score & Severity Levels
+- [ ] **Clean symbol** (e.g., AAPL, MSFT) shows score 1–2, emerald border, `ShieldCheck` icon, `CLEAN — LOW RISK` badge
+- [ ] **Medium risk symbol** (recent earnings within 3d) shows score 3, amber badge, `AlertTriangle` icon
+- [ ] **High risk symbol** (active offering or recent reverse split) shows score 4–6, orange badge, `Siren` icon
+- [ ] **Toxic symbol** (combination of dilution + reverse split + imminent earnings) shows:
+  - [ ] Score 7–10
+  - [ ] Flashing red border pulse (`animate-toxic-pulse` keyframe)
+  - [ ] `⚠️ TOXIC CAPITAL STRUCTURE DETECTED` badge
+  - [ ] Explicit summary: *"Heavy sell pressure expected. This is a dangerous vehicle for swing exposure."*
+
+#### Risk Flags & Details
+- [ ] Each active flag shows:
+  - [ ] Title (e.g., `Active Dilution / Toxic Financing`, `Imminent Reverse Split`, `Imminent Earnings`)
+  - [ ] Detail string with source/date context
+  - [ ] Score delta (`+4 pts`, `+5 pts`, `+3 pts`)
+  - [ ] Days-ago or days-until metadata
+  - [ ] External source link when available (clickable `source` link with `ExternalLink` icon)
+- [ ] Dilution flags distinguish between institutional deals (PIPE/hedge-fund) and public offerings
+- [ ] Reverse split flags parse and display the ratio (e.g., `1-for-20`)
+- [ ] Earnings flags show the session (BMO/AMC) and exact date
+
+#### Fault Tolerance
+- [ ] Without a Finnhub API key: shows non-blocking "scanner offline" notice with hint text
+- [ ] Partial scan (one endpoint fails): shows `partial scan` badge + summary of what succeeded
+- [ ] Form submission remains fully available in all failure modes
+- [ ] Explicit footer: *"Advisory only — execution remains in your control. Flags do not block order entry."*
+
+#### Visual Components
+- [ ] Gradient risk meter bar fills proportionally (0–100%, color-coded by severity)
+- [ ] Inline `Loader2` spinner appears during refresh scans
+- [ ] Toxic-tier scores show flashing red pulse (red box-shadow ring + intensifying border, 1.6s loop)
+- [ ] Score panel layout: icon left, score + badge + summary center, meter bar bottom
+
 ### Add Position Form — Risk-Based Sizing
 
 #### Form Fields
 - [ ] Form has 5 fields: Symbol · Buy Price · Stop-Loss Price · Max Account Risk · Number of Shares
+- [ ] **Corporate Risk Assessment panel** appears ABOVE the entry fields when a symbol is entered
 - [ ] Layout is 2-column on `lg+` (form left, sizing card right)
 
 #### Automated Share Calculation
@@ -339,22 +380,24 @@ For each open trade:
 
 ---
 
-## Quick Smoke Sequence (~5 min)
+## Quick Smoke Sequence (~7 min)
 
 1. Open the app — verify AAPL loads with `Live · …` badge.
 2. **Tab 1**: Verify Gap pill, PM range pill, dashed PM High/Low lines on the chart, and dashed gray SPY overlay with right-side %-axis.
-3. **Tab 2**: Click "+ Add Position" → enter AAPL, $180, $171, $150 → confirm Scenario Matrix, click `Use this` on −5% → confirm Shares=16 → Submit.
-4. Click **Report Sale** at $185 → pick "Pre-market Gainer" catalyst → Confirm.
-5. **Tab 3**: Verify the calendar cell for today is green and the Equity Curve has a point.
-6. Verify **Gold Statistics** shows 100% Win Rate, ∞ Profit Factor, and the correct numbers.
-7. Verify **Edge Finder** highlights `Pre-market Gainer` as your edge.
-8. Click today's calendar cell → **Tab: Show Details** → pencil icon → change catalyst to "FOMO / Emotional" → Save.
-9. Confirm Edge Finder now shows the new catalyst attribution.
-10. Click **Log Historical Trade** → backfill yesterday with NVDA / 5 / 200 / 195 / "FOMO / Emotional" → Submit.
-11. Confirm yesterday's calendar cell turns red and Edge Finder now shows a "Risk Warning" callout.
-12. Click **Export Backup** — confirm the file downloads.
-13. Clear `localStorage` and reload.
-14. Click **Import Backup**, pick the file, confirm.
-15. Verify everything reappears without a manual refresh.
+3. **Tab 2**: Click "+ Add Position" → type AAPL → confirm **Corporate Risk Assessment** panel appears with loading skeleton, then score + flags (likely clean/low for AAPL).
+4. Complete form: $180 buy, $171 stop, $150 max risk → confirm Scenario Matrix, click `Use this` on −5% → confirm Shares=16 → Submit.
+5. Click **Report Sale** at $185 → pick "Pre-market Gainer" catalyst → Confirm.
+6. **Tab 3**: Verify the calendar cell for today is green and the Equity Curve has a point.
+7. Verify **Gold Statistics** shows 100% Win Rate, ∞ Profit Factor, and the correct numbers.
+8. Verify **Edge Finder** highlights `Pre-market Gainer` as your edge.
+9. Click today's calendar cell → **Tab: Show Details** → pencil icon → change catalyst to "FOMO / Emotional" → Save.
+10. Confirm Edge Finder now shows the new catalyst attribution.
+11. Click **Log Historical Trade** → backfill yesterday with NVDA / 5 / 200 / 195 / "FOMO / Emotional" → Submit.
+12. Confirm yesterday's calendar cell turns red and Edge Finder now shows a "Risk Warning" callout.
+13. **Tab 2** → Try scanning a known high-risk symbol (if you have a Finnhub key and know of a recent dilution/reverse-split ticker, test it; otherwise skip).
+14. Click **Export Backup** — confirm the file downloads.
+15. Clear `localStorage` and reload.
+16. Click **Import Backup**, pick the file, confirm.
+17. Verify everything reappears without a manual refresh.
 
-If all 15 steps pass, the app is healthy.
+If all steps pass, the app is healthy.

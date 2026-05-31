@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Target,
   Plus,
@@ -11,6 +11,12 @@ import {
   Calculator,
   ShieldAlert,
   Crosshair,
+  Activity,
+  ShieldCheck,
+  Siren,
+  CalendarClock,
+  Loader2,
+  ExternalLink,
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
 import { Field } from './ui/Field'
@@ -23,6 +29,12 @@ import {
 } from '../utils/format'
 import type { ActiveTrade, TradeCatalyst } from '../types'
 import { TRADE_CATALYSTS } from '../types'
+import {
+  scanCorporateRisk,
+  type RiskFlag,
+  type RiskScanResult,
+  type RiskSeverity,
+} from '../services/riskScannerService'
 
 const TARGET_TIERS = [0.05, 0.1, 0.15, 0.2] as const
 
@@ -459,7 +471,9 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
         </button>
       }
     >
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+      <CorporateRiskAssessment symbol={symbol.trim()} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mt-4">
         <div className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field
@@ -1093,6 +1107,347 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Corporate Risk Assessment — fundamental scanner panel
+// ---------------------------------------------------------------------------
+
+const SCAN_DEBOUNCE_MS = 600
+
+interface CorporateRiskAssessmentProps {
+  symbol: string
+}
+
+function CorporateRiskAssessment({ symbol }: CorporateRiskAssessmentProps) {
+  const [scan, setScan] = useState<RiskScanResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    // Abort any in-flight request when the symbol changes or the form closes.
+    abortRef.current?.abort()
+
+    const trimmed = symbol.trim().toUpperCase()
+    if (trimmed.length < 1) {
+      setScan(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const handle = window.setTimeout(async () => {
+      try {
+        const result = await scanCorporateRisk(trimmed, controller.signal)
+        if (controller.signal.aborted) return
+        setScan(result)
+      } catch (err) {
+        if (controller.signal.aborted) return
+        setError(err instanceof Error ? err.message : 'Scan failed')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }, SCAN_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(handle)
+      controller.abort()
+    }
+  }, [symbol])
+
+  if (!symbol) {
+    return (
+      <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-3 text-[11px] text-zinc-500 flex items-center gap-2">
+        <Activity className="w-3.5 h-3.5 text-zinc-600" />
+        Enter a <span className="text-zinc-300">Symbol</span> to run the
+        Corporate Risk Scan (dilution · reverse splits · earnings).
+      </div>
+    )
+  }
+
+  if (loading && !scan) {
+    return <RiskScanSkeleton symbol={symbol} />
+  }
+
+  if (error && !scan) {
+    return (
+      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200 flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4 text-amber-300" />
+        Risk scan failed: {error}. Position controls remain available.
+      </div>
+    )
+  }
+
+  if (!scan) return null
+
+  return <RiskScanResultPanel scan={scan} refreshing={loading} />
+}
+
+function RiskScanSkeleton({ symbol }: { symbol: string }) {
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-4 animate-pulse">
+      <div className="flex items-center gap-2 mb-3">
+        <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
+        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+          Scanning {symbol} · Corporate Risk Assessment
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 items-center">
+        <div className="h-16 w-16 rounded-md bg-zinc-800/60" />
+        <div className="space-y-2">
+          <div className="h-3 w-1/2 rounded bg-zinc-800/60" />
+          <div className="h-3 w-3/4 rounded bg-zinc-800/60" />
+          <div className="h-3 w-2/3 rounded bg-zinc-800/60" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface SeverityTheme {
+  border: string
+  bg: string
+  badgeBg: string
+  badgeText: string
+  badgeLabel: string
+  scoreText: string
+  ring: string
+  icon: typeof ShieldCheck
+  iconBg: string
+  iconColor: string
+}
+
+const SEVERITY_THEMES: Record<RiskSeverity, SeverityTheme> = {
+  low: {
+    border: 'border-emerald-500/40',
+    bg: 'bg-emerald-500/5',
+    badgeBg: 'bg-emerald-500/15 border-emerald-400/40',
+    badgeText: 'text-emerald-200',
+    badgeLabel: 'CLEAN — LOW RISK',
+    scoreText: 'text-emerald-300',
+    ring: 'ring-1 ring-emerald-500/30',
+    icon: ShieldCheck,
+    iconBg: 'bg-emerald-500/15 border-emerald-400/40',
+    iconColor: 'text-emerald-300',
+  },
+  medium: {
+    border: 'border-amber-500/40',
+    bg: 'bg-amber-500/5',
+    badgeBg: 'bg-amber-500/15 border-amber-400/40',
+    badgeText: 'text-amber-200',
+    badgeLabel: 'MEDIUM RISK',
+    scoreText: 'text-amber-300',
+    ring: 'ring-1 ring-amber-500/30',
+    icon: AlertTriangle,
+    iconBg: 'bg-amber-500/15 border-amber-400/40',
+    iconColor: 'text-amber-300',
+  },
+  high: {
+    border: 'border-orange-500/50',
+    bg: 'bg-orange-500/5',
+    badgeBg: 'bg-orange-500/20 border-orange-400/60',
+    badgeText: 'text-orange-100',
+    badgeLabel: 'HIGH RISK',
+    scoreText: 'text-orange-300',
+    ring: 'ring-1 ring-orange-500/40',
+    icon: Siren,
+    iconBg: 'bg-orange-500/20 border-orange-400/60',
+    iconColor: 'text-orange-200',
+  },
+  toxic: {
+    border: 'border-red-500/70',
+    bg: 'bg-red-500/10',
+    badgeBg: 'bg-red-500/30 border-red-400/80',
+    badgeText: 'text-red-50',
+    badgeLabel: '⚠️ TOXIC CAPITAL STRUCTURE DETECTED',
+    scoreText: 'text-red-300',
+    ring: 'ring-2 ring-red-500/60',
+    icon: Siren,
+    iconBg: 'bg-red-500/30 border-red-400/80',
+    iconColor: 'text-red-100',
+  },
+}
+
+const FLAG_ICONS: Record<RiskFlag['kind'], typeof ShieldAlert> = {
+  dilution: DollarSign,
+  'reverse-split-recent': Activity,
+  'reverse-split-upcoming': Activity,
+  'earnings-imminent': CalendarClock,
+  'earnings-recent': CalendarClock,
+}
+
+const FLAG_TONES: Record<RiskFlag['kind'], string> = {
+  dilution: 'border-red-500/40 bg-red-500/5 text-red-100',
+  'reverse-split-recent': 'border-red-500/40 bg-red-500/5 text-red-100',
+  'reverse-split-upcoming': 'border-red-500/40 bg-red-500/5 text-red-100',
+  'earnings-imminent': 'border-amber-500/40 bg-amber-500/5 text-amber-100',
+  'earnings-recent': 'border-zinc-700 bg-zinc-900/60 text-zinc-200',
+}
+
+function RiskScanResultPanel({
+  scan,
+  refreshing,
+}: {
+  scan: RiskScanResult
+  refreshing: boolean
+}) {
+  const theme = SEVERITY_THEMES[scan.severity]
+  const Icon = theme.icon
+
+  const wrapperClass = [
+    'rounded-md border p-4 transition-all',
+    theme.border,
+    theme.bg,
+    theme.ring,
+    scan.severity === 'toxic' ? 'animate-toxic-pulse' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <div className={wrapperClass}>
+      <div className="flex items-start gap-3">
+        <div
+          className={`w-12 h-12 rounded-md flex items-center justify-center border ${theme.iconBg}`}
+        >
+          <Icon className={`w-6 h-6 ${theme.iconColor}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+              Corporate Risk Assessment · {scan.symbol}
+            </span>
+            {refreshing && (
+              <Loader2 className="w-3 h-3 text-zinc-500 animate-spin" />
+            )}
+            {scan.partial && (
+              <span className="text-[10px] text-zinc-500 italic">
+                · partial scan
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+            <span
+              className={`text-3xl font-mono tabular-nums font-bold leading-none ${theme.scoreText}`}
+            >
+              {scan.score}
+              <span className="text-base text-zinc-500 font-normal">/10</span>
+            </span>
+            <span
+              className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${theme.badgeBg} ${theme.badgeText}`}
+            >
+              {theme.badgeLabel}
+            </span>
+          </div>
+          <p className="mt-2 text-xs leading-snug text-zinc-200">
+            {scan.summary}
+          </p>
+        </div>
+      </div>
+
+      <ScoreMeter score={scan.score} severity={scan.severity} />
+
+      {scan.flags.length > 0 ? (
+        <div className="mt-3 space-y-1.5">
+          {scan.flags.map((flag, i) => (
+            <RiskFlagRow key={`${flag.kind}-${i}`} flag={flag} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-200 flex items-center gap-2">
+          <ShieldCheck className="w-3.5 h-3.5" />
+          No active corporate-action risks detected in the lookback window.
+        </div>
+      )}
+
+      <p className="mt-3 text-[10px] text-zinc-500 italic leading-snug">
+        Advisory only — execution remains in your control. Flags do not block
+        order entry. Sources: Finnhub company news (60d), splits calendar
+        (−30d / +7d), earnings calendar.
+      </p>
+    </div>
+  )
+}
+
+function ScoreMeter({
+  score,
+  severity,
+}: {
+  score: number
+  severity: RiskSeverity
+}) {
+  const pct = Math.max(0, Math.min(score, 10)) * 10
+  const fillClass =
+    severity === 'toxic'
+      ? 'bg-gradient-to-r from-red-500 to-red-300'
+      : severity === 'high'
+      ? 'bg-gradient-to-r from-orange-500 to-orange-300'
+      : severity === 'medium'
+      ? 'bg-gradient-to-r from-amber-500 to-amber-300'
+      : 'bg-gradient-to-r from-emerald-600 to-emerald-400'
+
+  return (
+    <div className="mt-3 h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
+      <div
+        className={`h-full transition-all duration-500 ${fillClass}`}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  )
+}
+
+function RiskFlagRow({ flag }: { flag: RiskFlag }) {
+  const Icon = FLAG_ICONS[flag.kind] ?? ShieldAlert
+  const tone = FLAG_TONES[flag.kind]
+
+  return (
+    <div className={`rounded-md border px-3 py-2 ${tone}`}>
+      <div className="flex items-start gap-2">
+        <Icon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              {flag.title}
+            </span>
+            <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+              +{flag.scoreDelta} pts
+            </span>
+            {flag.daysUntil != null && (
+              <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+                · in {flag.daysUntil}d
+              </span>
+            )}
+            {flag.daysAgo != null && (
+              <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+                · {flag.daysAgo}d ago
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-zinc-100/90">
+            {flag.detail}
+          </p>
+          {flag.url && (
+            <a
+              href={flag.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-[10px] text-zinc-300 hover:text-emerald-300 transition"
+            >
+              <ExternalLink className="w-3 h-3" />
+              source
+            </a>
+          )}
+        </div>
       </div>
     </div>
   )
