@@ -17,6 +17,13 @@ import {
   CalendarClock,
   Loader2,
   ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Building2,
+  Zap,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Panel } from './ui/Panel'
 import { Field } from './ui/Field'
@@ -31,6 +38,10 @@ import type { ActiveTrade, TradeCatalyst } from '../types'
 import { TRADE_CATALYSTS } from '../types'
 import {
   scanCorporateRisk,
+  type CorporateTimelineEvent,
+  type DnaEventKind,
+  type EarningsHealth,
+  type EarningsHealthData,
   type RiskFlag,
   type RiskScanResult,
   type RiskSeverity,
@@ -1113,7 +1124,8 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Corporate Risk Assessment — fundamental scanner panel
+// Corporate Risk Assessment — fundamental scanner panel (v2)
+// 1-Year DNA Profiling + Earnings Health Analysis
 // ---------------------------------------------------------------------------
 
 const SCAN_DEBOUNCE_MS = 600
@@ -1129,7 +1141,6 @@ function CorporateRiskAssessment({ symbol }: CorporateRiskAssessmentProps) {
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    // Abort any in-flight request when the symbol changes or the form closes.
     abortRef.current?.abort()
 
     const trimmed = symbol.trim().toUpperCase()
@@ -1170,7 +1181,7 @@ function CorporateRiskAssessment({ symbol }: CorporateRiskAssessmentProps) {
       <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-3 text-[11px] text-zinc-500 flex items-center gap-2">
         <Activity className="w-3.5 h-3.5 text-zinc-600" />
         Enter a <span className="text-zinc-300">Symbol</span> to run the
-        Corporate Risk Scan (dilution · reverse splits · earnings).
+        1-Year Corporate DNA Scan (dilution · reverse splits · earnings health).
       </div>
     )
   }
@@ -1195,24 +1206,42 @@ function CorporateRiskAssessment({ symbol }: CorporateRiskAssessmentProps) {
 
 function RiskScanSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-4 animate-pulse">
-      <div className="flex items-center gap-2 mb-3">
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-4 space-y-3 animate-pulse">
+      <div className="flex items-center gap-2">
         <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
         <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
-          Scanning {symbol} · Corporate Risk Assessment
+          Scanning {symbol} · 1-Year Corporate DNA Profile
         </span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 items-center">
+      {/* Score row skeleton */}
+      <div className="flex items-center gap-4">
         <div className="h-16 w-16 rounded-md bg-zinc-800/60" />
-        <div className="space-y-2">
-          <div className="h-3 w-1/2 rounded bg-zinc-800/60" />
-          <div className="h-3 w-3/4 rounded bg-zinc-800/60" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3 w-1/3 rounded bg-zinc-800/60" />
+          <div className="h-5 w-1/4 rounded bg-zinc-800/60" />
           <div className="h-3 w-2/3 rounded bg-zinc-800/60" />
         </div>
+      </div>
+      {/* Meter skeleton */}
+      <div className="h-1.5 rounded-full bg-zinc-800/60" />
+      {/* DNA section skeleton */}
+      <div className="h-px bg-zinc-800/60" />
+      <div className="space-y-2">
+        <div className="h-3 w-1/4 rounded bg-zinc-800/60" />
+        <div className="h-8 rounded bg-zinc-800/40" />
+        <div className="h-8 rounded bg-zinc-800/40" />
+      </div>
+      {/* Earnings section skeleton */}
+      <div className="h-px bg-zinc-800/60" />
+      <div className="space-y-2">
+        <div className="h-3 w-1/4 rounded bg-zinc-800/60" />
+        <div className="h-16 rounded bg-zinc-800/40" />
       </div>
     </div>
   )
 }
+
+// ─── Severity theme map ─────────────────────────────────────────────────────
 
 interface SeverityTheme {
   border: string
@@ -1278,21 +1307,62 @@ const SEVERITY_THEMES: Record<RiskSeverity, SeverityTheme> = {
   },
 }
 
+// ─── Flag maps ───────────────────────────────────────────────────────────────
+
 const FLAG_ICONS: Record<RiskFlag['kind'], typeof ShieldAlert> = {
   dilution: DollarSign,
-  'reverse-split-recent': Activity,
-  'reverse-split-upcoming': Activity,
+  'serial-diluter': Building2,
+  'reverse-split-recent': Zap,
+  'reverse-split-upcoming': Zap,
   'earnings-imminent': CalendarClock,
+  'earnings-upcoming': CalendarClock,
   'earnings-recent': CalendarClock,
 }
 
 const FLAG_TONES: Record<RiskFlag['kind'], string> = {
   dilution: 'border-red-500/40 bg-red-500/5 text-red-100',
+  'serial-diluter': 'border-red-600/60 bg-red-600/10 text-red-50',
   'reverse-split-recent': 'border-red-500/40 bg-red-500/5 text-red-100',
   'reverse-split-upcoming': 'border-red-500/40 bg-red-500/5 text-red-100',
   'earnings-imminent': 'border-amber-500/40 bg-amber-500/5 text-amber-100',
+  'earnings-upcoming': 'border-amber-400/30 bg-amber-400/5 text-amber-200',
   'earnings-recent': 'border-zinc-700 bg-zinc-900/60 text-zinc-200',
 }
+
+// ─── DNA event kind display map ──────────────────────────────────────────────
+
+const DNA_KIND_STYLES: Record<
+  DnaEventKind,
+  { dot: string; badge: string; label: string }
+> = {
+  offering: {
+    dot: 'bg-red-400',
+    badge: 'bg-red-500/15 border-red-400/40 text-red-200',
+    label: 'Offering',
+  },
+  atm: {
+    dot: 'bg-orange-400',
+    badge: 'bg-orange-500/15 border-orange-400/40 text-orange-200',
+    label: 'ATM',
+  },
+  convertible: {
+    dot: 'bg-rose-400',
+    badge: 'bg-rose-500/15 border-rose-400/40 text-rose-200',
+    label: 'Convertible',
+  },
+  'private-placement': {
+    dot: 'bg-pink-400',
+    badge: 'bg-pink-500/15 border-pink-400/40 text-pink-200',
+    label: 'PIPE',
+  },
+  'reverse-split': {
+    dot: 'bg-purple-400',
+    badge: 'bg-purple-500/15 border-purple-400/40 text-purple-200',
+    label: 'Rev. Split',
+  },
+}
+
+// ─── Main result panel ───────────────────────────────────────────────────────
 
 function RiskScanResultPanel({
   scan,
@@ -1305,7 +1375,7 @@ function RiskScanResultPanel({
   const Icon = theme.icon
 
   const wrapperClass = [
-    'rounded-md border p-4 transition-all',
+    'rounded-md border transition-all',
     theme.border,
     theme.bg,
     theme.ring,
@@ -1316,80 +1386,99 @@ function RiskScanResultPanel({
 
   return (
     <div className={wrapperClass}>
-      <div className="flex items-start gap-3">
-        <div
-          className={`w-12 h-12 rounded-md flex items-center justify-center border ${theme.iconBg}`}
-        >
-          <Icon className={`w-6 h-6 ${theme.iconColor}`} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
-              Corporate Risk Assessment · {scan.symbol}
-            </span>
-            {refreshing && (
-              <Loader2 className="w-3 h-3 text-zinc-500 animate-spin" />
-            )}
-            {scan.partial && (
-              <span className="text-[10px] text-zinc-500 italic">
-                · partial scan
+      {/* ── Header: score + badge + summary ── */}
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-12 h-12 rounded-md flex-shrink-0 flex items-center justify-center border ${theme.iconBg}`}
+          >
+            <Icon className={`w-6 h-6 ${theme.iconColor}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+                Corporate Risk Assessment · {scan.symbol}
               </span>
-            )}
+              {refreshing && (
+                <Loader2 className="w-3 h-3 text-zinc-500 animate-spin" />
+              )}
+              {scan.partial && (
+                <span className="text-[10px] text-zinc-500 italic">
+                  · partial scan
+                </span>
+              )}
+            </div>
+            <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+              <span
+                className={`text-3xl font-mono tabular-nums font-bold leading-none ${theme.scoreText}`}
+              >
+                {scan.score}
+                <span className="text-base text-zinc-500 font-normal">/10</span>
+              </span>
+              <span
+                className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${theme.badgeBg} ${theme.badgeText}`}
+              >
+                {theme.badgeLabel}
+              </span>
+              {scan.serialDiluter && (
+                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border bg-red-600/20 border-red-500/60 text-red-200">
+                  Serial Diluter
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-xs leading-snug text-zinc-200">
+              {scan.summary}
+            </p>
           </div>
-          <div className="mt-1 flex items-baseline gap-3 flex-wrap">
-            <span
-              className={`text-3xl font-mono tabular-nums font-bold leading-none ${theme.scoreText}`}
-            >
-              {scan.score}
-              <span className="text-base text-zinc-500 font-normal">/10</span>
-            </span>
-            <span
-              className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${theme.badgeBg} ${theme.badgeText}`}
-            >
-              {theme.badgeLabel}
-            </span>
-          </div>
-          <p className="mt-2 text-xs leading-snug text-zinc-200">
-            {scan.summary}
-          </p>
         </div>
+
+        <ScoreMeter score={scan.score} severity={scan.severity} />
+
+        {/* Active flags */}
+        {scan.flags.length > 0 ? (
+          <div className="mt-3 space-y-1.5">
+            {scan.flags.map((flag, i) => (
+              <RiskFlagRow key={`${flag.kind}-${i}`} flag={flag} />
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 rounded border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-200 flex items-center gap-2">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            No active corporate-action risks detected in the 1-year lookback.
+          </div>
+        )}
       </div>
 
-      <ScoreMeter score={scan.score} severity={scan.severity} />
+      {/* ── Section divider ── */}
+      <div className="border-t border-zinc-800/60" />
 
-      {scan.flags.length > 0 ? (
-        <div className="mt-3 space-y-1.5">
-          {scan.flags.map((flag, i) => (
-            <RiskFlagRow key={`${flag.kind}-${i}`} flag={flag} />
-          ))}
-        </div>
-      ) : (
-        <div className="mt-3 rounded border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-200 flex items-center gap-2">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          No active corporate-action risks detected in the lookback window.
-        </div>
-      )}
+      {/* ── 1-Year Corporate DNA Profile ── */}
+      <CorporateDnaSection dna={scan.corporateDna} dilutionCount={scan.dilutionCount} serialDiluter={scan.serialDiluter} />
 
-      <p className="mt-3 text-[10px] text-zinc-500 italic leading-snug">
-        Advisory only — execution remains in your control. Flags do not block
-        order entry. Sources: Finnhub company news (60d), splits calendar
-        (−30d / +7d), earnings calendar.
-      </p>
+      {/* ── Section divider ── */}
+      <div className="border-t border-zinc-800/60" />
+
+      {/* ── Earnings & Financial Health ── */}
+      <EarningsHealthSection health={scan.earningsHealth} />
+
+      {/* ── Footer ── */}
+      <div className="px-4 pb-3 pt-2">
+        <p className="text-[10px] text-zinc-500 italic leading-snug">
+          Advisory only — execution remains in your control. Flags do not block order entry.
+          Sources: Finnhub company news (1yr), splits calendar (−1yr / +7d), earnings calendar (−30d / +120d).
+        </p>
+      </div>
     </div>
   )
 }
 
-function ScoreMeter({
-  score,
-  severity,
-}: {
-  score: number
-  severity: RiskSeverity
-}) {
+// ─── Score meter ─────────────────────────────────────────────────────────────
+
+function ScoreMeter({ score, severity }: { score: number; severity: RiskSeverity }) {
   const pct = Math.max(0, Math.min(score, 10)) * 10
   const fillClass =
     severity === 'toxic'
-      ? 'bg-gradient-to-r from-red-500 to-red-300'
+      ? 'bg-gradient-to-r from-red-600 to-red-300'
       : severity === 'high'
       ? 'bg-gradient-to-r from-orange-500 to-orange-300'
       : severity === 'medium'
@@ -1406,6 +1495,8 @@ function ScoreMeter({
   )
 }
 
+// ─── Flag row ────────────────────────────────────────────────────────────────
+
 function RiskFlagRow({ flag }: { flag: RiskFlag }) {
   const Icon = FLAG_ICONS[flag.kind] ?? ShieldAlert
   const tone = FLAG_TONES[flag.kind]
@@ -1419,9 +1510,11 @@ function RiskFlagRow({ flag }: { flag: RiskFlag }) {
             <span className="text-[11px] font-bold uppercase tracking-wider">
               {flag.title}
             </span>
-            <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
-              +{flag.scoreDelta} pts
-            </span>
+            {flag.scoreDelta > 0 && (
+              <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+                +{flag.scoreDelta} pts
+              </span>
+            )}
             {flag.daysUntil != null && (
               <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
                 · in {flag.daysUntil}d
@@ -1450,5 +1543,342 @@ function RiskFlagRow({ flag }: { flag: RiskFlag }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// ─── 1-Year Corporate DNA Profile section ────────────────────────────────────
+
+const MAX_DNA_VISIBLE = 5
+
+function CorporateDnaSection({
+  dna,
+  dilutionCount,
+  serialDiluter,
+}: {
+  dna: CorporateTimelineEvent[]
+  dilutionCount: number
+  serialDiluter: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? dna : dna.slice(0, MAX_DNA_VISIBLE)
+
+  return (
+    <div className="p-4">
+      {/* Section header */}
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <Building2 className="w-3.5 h-3.5 text-zinc-400" />
+          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+            1-Year Corporate DNA Profile
+          </span>
+          {dilutionCount > 0 && (
+            <span
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border font-mono tabular-nums ${
+                serialDiluter
+                  ? 'bg-red-500/20 border-red-400/50 text-red-200'
+                  : 'bg-zinc-800/60 border-zinc-700 text-zinc-300'
+              }`}
+            >
+              {dilutionCount} event{dilutionCount !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        {serialDiluter && (
+          <span className="text-[10px] font-bold text-red-300 uppercase tracking-wide">
+            Serial Diluter
+          </span>
+        )}
+      </div>
+
+      {dna.length === 0 ? (
+        <div className="rounded border border-zinc-800/60 bg-zinc-950/40 px-3 py-2.5 text-[11px] text-zinc-500 flex items-center gap-2">
+          <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
+          No offerings, ATM facilities, convertible notes, or reverse splits
+          detected in the past 12 months.
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_auto] text-[9px] uppercase tracking-wider text-zinc-600 font-semibold px-2 mb-1">
+            <span>Event</span>
+            <span>Date</span>
+          </div>
+          {visible.map((event, i) => (
+            <DnaEventRow key={`${event.date}-${event.kind}-${i}`} event={event} />
+          ))}
+          {dna.length > MAX_DNA_VISIBLE && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1 w-full flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition py-1"
+            >
+              {expanded ? (
+                <>
+                  <ChevronUp className="w-3 h-3" /> Show less
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3 h-3" />
+                  Show {dna.length - MAX_DNA_VISIBLE} more
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {serialDiluter && (
+        <div className="mt-3 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-100 leading-snug">
+          <span className="font-bold uppercase tracking-wider">
+            Serial Diluter Warning:
+          </span>{' '}
+          Management has executed {dilutionCount} distinct financing or share-consolidation
+          events in 12 months. This is a documented pattern of shareholder dilution.
+          Avoid holding overnight without a tight stop.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DnaEventRow({ event }: { event: CorporateTimelineEvent }) {
+  const style = DNA_KIND_STYLES[event.kind]
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-start gap-2 rounded border border-zinc-800/60 bg-zinc-950/50 px-3 py-2 text-[11px]">
+      <div className="flex items-start gap-2 min-w-0">
+        <span className={`mt-1.5 flex-shrink-0 w-2 h-2 rounded-full ${style.dot}`} />
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span
+              className={`text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded border ${style.badge}`}
+            >
+              {style.label}
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {event.daysAgo}d ago
+            </span>
+          </div>
+          <p className="mt-0.5 text-zinc-300 leading-snug truncate" title={event.detail}>
+            {event.detail}
+          </p>
+          {event.url && (
+            <a
+              href={event.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-0.5 inline-flex items-center gap-1 text-[9px] text-zinc-500 hover:text-emerald-300 transition"
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              source
+            </a>
+          )}
+        </div>
+      </div>
+      <span className="font-mono text-[10px] text-zinc-500 tabular-nums whitespace-nowrap">
+        {event.date}
+      </span>
+    </div>
+  )
+}
+
+// ─── Earnings & Financial Health section ─────────────────────────────────────
+
+const HEALTH_STYLES: Record<
+  EarningsHealth,
+  { border: string; bg: string; iconColor: string; icon: typeof TrendingUp; label: string; labelColor: string }
+> = {
+  strong: {
+    border: 'border-emerald-500/40',
+    bg: 'bg-emerald-500/5',
+    icon: TrendingUp,
+    iconColor: 'text-emerald-300',
+    label: 'Recommended Trend: Strong Financial Posture',
+    labelColor: 'text-emerald-200',
+  },
+  caution: {
+    border: 'border-amber-500/40',
+    bg: 'bg-amber-500/5',
+    icon: AlertTriangle,
+    iconColor: 'text-amber-300',
+    label: 'Risk Caution: Binary Earnings Window active / Weak Financial Posture',
+    labelColor: 'text-amber-200',
+  },
+  neutral: {
+    border: 'border-zinc-700/60',
+    bg: 'bg-zinc-900/40',
+    icon: Minus,
+    iconColor: 'text-zinc-400',
+    label: 'Neutral Financial Posture',
+    labelColor: 'text-zinc-300',
+  },
+}
+
+const SURPRISE_STYLES = {
+  beat: { text: 'text-emerald-300', icon: TrendingUp, label: 'Beat' },
+  miss: { text: 'text-red-300', icon: TrendingDown, label: 'Miss' },
+  inline: { text: 'text-zinc-300', icon: Minus, label: 'In-line' },
+}
+
+function EarningsHealthSection({ health }: { health: EarningsHealthData | null }) {
+  const style = HEALTH_STYLES[health?.health ?? 'neutral']
+  const HealthIcon = style.icon
+
+  return (
+    <div className="p-4">
+      {/* Section header */}
+      <div className="flex items-center gap-2 mb-3">
+        <CalendarClock className="w-3.5 h-3.5 text-zinc-400" />
+        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+          Earnings &amp; Financial Health View
+        </span>
+      </div>
+
+      {!health ? (
+        <div className="rounded border border-zinc-800/60 bg-zinc-950/40 px-3 py-2.5 text-[11px] text-zinc-500 flex items-center gap-2">
+          <CalendarClock className="w-3.5 h-3.5 text-zinc-600" />
+          No earnings data available for this symbol.
+        </div>
+      ) : (
+        <div className={`rounded border ${style.border} ${style.bg} p-3 space-y-3`}>
+          {/* Health recommendation */}
+          <div className="flex items-start gap-2">
+            <HealthIcon className={`w-4 h-4 flex-shrink-0 mt-0.5 ${style.iconColor}`} />
+            <div>
+              <span className={`text-[11px] font-bold uppercase tracking-wide ${style.labelColor}`}>
+                {health.health === 'strong' ? '🟢 ' : health.health === 'caution' ? '🟡 ' : '⚪ '}
+                {style.label}
+              </span>
+              <p className="mt-0.5 text-[11px] text-zinc-300 leading-snug">
+                {health.reason}
+              </p>
+            </div>
+          </div>
+
+          {/* Data grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Upcoming earnings */}
+            {health.nextDate && (
+              <div className="rounded border border-zinc-700/60 bg-zinc-950/50 px-3 py-2 space-y-0.5">
+                <div className="text-[9px] uppercase tracking-wider text-zinc-500 font-semibold">
+                  Next Report
+                </div>
+                <div className="text-sm font-mono tabular-nums text-zinc-100 font-semibold">
+                  {health.nextDate}
+                </div>
+                <div className="text-[10px] text-zinc-400 font-mono tabular-nums flex items-center gap-1">
+                  {health.nextDaysUntil != null && (
+                    <span
+                      className={
+                        health.nextDaysUntil <= 3
+                          ? 'text-red-300 font-semibold'
+                          : health.nextDaysUntil <= 30
+                          ? 'text-amber-300'
+                          : 'text-zinc-400'
+                      }
+                    >
+                      in {health.nextDaysUntil}d
+                    </span>
+                  )}
+                  {health.nextSession === 'bmo' && (
+                    <span className="text-zinc-500">· BMO</span>
+                  )}
+                  {health.nextSession === 'amc' && (
+                    <span className="text-zinc-500">· AMC</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Last reported */}
+            {health.lastDate && (
+              <div className="rounded border border-zinc-700/60 bg-zinc-950/50 px-3 py-2 space-y-0.5">
+                <div className="text-[9px] uppercase tracking-wider text-zinc-500 font-semibold">
+                  Last Reported
+                </div>
+                <div className="text-sm font-mono tabular-nums text-zinc-100 font-semibold">
+                  {health.lastDate}
+                  <span className="ml-1 text-[10px] text-zinc-500 font-normal">
+                    ({health.lastDaysAgo}d ago)
+                  </span>
+                </div>
+                {health.epsSurprise && (
+                  <EpsSurpriseBadge
+                    surprise={health.epsSurprise}
+                    actual={health.epsActual}
+                    estimate={health.epsEstimate}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Revenue row — only when data exists */}
+          {(health.revenueActual != null || health.revenueEstimate != null) && (
+            <div className="rounded border border-zinc-700/60 bg-zinc-950/50 px-3 py-2">
+              <div className="text-[9px] uppercase tracking-wider text-zinc-500 font-semibold mb-1">
+                Revenue (last reported quarter)
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                {health.revenueActual != null && (
+                  <span className="text-[11px] font-mono tabular-nums text-zinc-100">
+                    Actual:{' '}
+                    <span className="font-semibold">
+                      ${(health.revenueActual / 1e6).toFixed(1)}M
+                    </span>
+                  </span>
+                )}
+                {health.revenueEstimate != null && (
+                  <span className="text-[11px] font-mono tabular-nums text-zinc-400">
+                    Est: ${(health.revenueEstimate / 1e6).toFixed(1)}M
+                  </span>
+                )}
+                {health.revenueActual != null && health.revenueEstimate != null && (
+                  <RevenueDelta
+                    actual={health.revenueActual}
+                    estimate={health.revenueEstimate}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EpsSurpriseBadge({
+  surprise,
+  actual,
+  estimate,
+}: {
+  surprise: 'beat' | 'miss' | 'inline'
+  actual?: number
+  estimate?: number
+}) {
+  const style = SURPRISE_STYLES[surprise]
+  const SurpriseIcon = style.icon
+  return (
+    <div className={`flex items-center gap-1 text-[10px] font-mono tabular-nums ${style.text}`}>
+      <SurpriseIcon className="w-3 h-3" />
+      <span className="font-semibold">{style.label}</span>
+      {actual != null && estimate != null && (
+        <span className="text-zinc-400 font-normal">
+          · EPS {actual.toFixed(2)} vs est {estimate.toFixed(2)}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function RevenueDelta({ actual, estimate }: { actual: number; estimate: number }) {
+  const pct = ((actual - estimate) / Math.abs(estimate)) * 100
+  const positive = pct >= 0
+  return (
+    <span
+      className={`text-[10px] font-mono tabular-nums font-semibold ${positive ? 'text-emerald-300' : 'text-red-300'}`}
+    >
+      ({positive ? '+' : ''}{pct.toFixed(1)}%)
+    </span>
   )
 }
