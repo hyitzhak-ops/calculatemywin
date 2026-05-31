@@ -32,17 +32,6 @@ export interface Ticker {
   lastUpdated: number | null
 }
 
-export interface StockSimulation {
-  id: string
-  symbol: string
-  shares: number
-  buyPrice: number
-  sellPrice: number
-  expectedProfitUSD: number
-  expectedProfitPercent: number
-  timestamp: number
-}
-
 export interface ActiveTrade {
   id: string
   symbol: string

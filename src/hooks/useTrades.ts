@@ -109,6 +109,51 @@ export function useTrades() {
     persist(COMPLETED_KEY, [])
   }
 
+  const addCompletedTrade = (input: Omit<CompletedTrade, 'id'>) => {
+    const trade: CompletedTrade = {
+      ...input,
+      id: crypto.randomUUID(),
+    }
+    setCompletedTrades((prev) => {
+      const next = [trade, ...prev]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, MAX_COMPLETED)
+      persist(COMPLETED_KEY, next)
+      return next
+    })
+    return trade
+  }
+
+  const updateCompletedTrade = (id: string, updates: Partial<Omit<CompletedTrade, 'id'>>) => {
+    setCompletedTrades((prev) => {
+      const next = prev.map((t) => {
+        if (t.id !== id) return t
+        const updated = { ...t, ...updates }
+        if (
+          updates.buyPrice !== undefined ||
+          updates.sellPrice !== undefined ||
+          updates.shares !== undefined
+        ) {
+          const buyPrice = updates.buyPrice ?? t.buyPrice
+          const sellPrice = updates.sellPrice ?? t.sellPrice
+          const shares = updates.shares ?? t.shares
+          updated.profitUSD = (sellPrice - buyPrice) * shares
+        }
+        return updated
+      })
+      persist(COMPLETED_KEY, next)
+      return next
+    })
+  }
+
+  const deleteCompletedTrade = (id: string) => {
+    setCompletedTrades((prev) => {
+      const next = prev.filter((t) => t.id !== id)
+      persist(COMPLETED_KEY, next)
+      return next
+    })
+  }
+
   const setGoal = (next: DailyGoal) => {
     setGoalState(next)
     persist(GOAL_KEY, next)
@@ -135,6 +180,9 @@ export function useTrades() {
     removeActiveTrade,
     closeTrade,
     clearCompletedTrades,
+    addCompletedTrade,
+    updateCompletedTrade,
+    deleteCompletedTrade,
   }
 }
 

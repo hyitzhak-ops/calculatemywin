@@ -5,8 +5,21 @@ export const STORAGE_KEYS = {
   completedTrades: 'calculatemywin_completed_trades',
   dailyGoal: 'calculatemywin_daily_goal',
   dailyJournalNotes: 'calculatemywin_journal_notes',
-  simulations: 'calculatemywin_simulations',
 } as const
+
+const LEGACY_STORAGE_KEYS = ['calculatemywin_simulations'] as const
+
+export function purgeLegacyStorageKeys(): void {
+  for (const key of LEGACY_STORAGE_KEYS) {
+    try {
+      if (localStorage.getItem(key) !== null) {
+        localStorage.removeItem(key)
+      }
+    } catch {
+      // ignore — storage may be disabled
+    }
+  }
+}
 
 export type BackupKey = keyof typeof STORAGE_KEYS
 
@@ -132,7 +145,6 @@ const SHAPE_VALIDATORS: Record<BackupKey, (v: unknown) => boolean> = {
   completedTrades: isPlainArray,
   dailyGoal: isValidGoal,
   dailyJournalNotes: (v) => isPlainObject(v) || isPlainArray(v),
-  simulations: isPlainArray,
 }
 
 export function applyBackup(payload: BackupPayload): ApplyResult {

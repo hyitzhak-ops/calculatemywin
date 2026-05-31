@@ -1,9 +1,6 @@
 import { useState } from 'react'
 import { BarChart3, ShieldCheck, BookOpen } from 'lucide-react'
 import { TickerGrid } from './TickerGrid'
-import { PercentCalculator } from './PercentCalculator'
-import { PositionCalculator } from './PositionCalculator'
-import { SimulationLog } from './SimulationLog'
 import { RiskManagerTab } from './RiskManagerTab'
 import { JournalReportsTab } from './JournalReportsTab'
 import { BackupControls } from './BackupControls'
@@ -82,18 +79,7 @@ export function Dashboard() {
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {activeTab === 'dashboard' && (
-          <>
-            <TickerGrid />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <PercentCalculator />
-              <PositionCalculator />
-            </div>
-
-            <SimulationLog />
-          </>
-        )}
+        {activeTab === 'dashboard' && <TickerGrid />}
         {activeTab === 'risk-manager' && <RiskManagerTab />}
         {activeTab === 'journal' && <JournalReportsTab />}
       </main>

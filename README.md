@@ -1,6 +1,6 @@
 # Calculate My Win — Day Trading Dashboard
 
-A **100% client-side** day trading dashboard that combines a live multi-stock watchlist, an active-position risk manager with profit/stop-loss matrices, and a full performance journal with calendar, equity curve, and date-range reporting. All state is persisted to `localStorage` and can be exported/imported as a JSON backup file at any time.
+A **100% client-side** day trading dashboard that combines a live multi-stock watchlist, an active-position risk manager with profit/stop-loss matrices, and a full performance journal with calendar, equity curve, retroactive trade entry, and inline trade editing. All state is persisted to `localStorage` and can be exported/imported as a JSON backup file at any time.
 
 > **No backend. No accounts. No API keys required.** Optional Finnhub key improves live quotes; otherwise the app falls back to Yahoo Finance, then deterministic demo data.
 
@@ -15,7 +15,7 @@ A **100% client-side** day trading dashboard that combines a live multi-stock wa
 | Charts       | Recharts (Area + custom tooltips) |
 | Icons        | Lucide React |
 | State        | React Context + custom hooks |
-| Persistence  | `localStorage` (5 keyed slices) + JSON backup file |
+| Persistence  | `localStorage` (4 keyed slices) + JSON backup file |
 | Fonts        | IBM Plex Sans (UI) · JetBrains Mono (numbers, `tabular-nums`) |
 
 ---
@@ -24,17 +24,16 @@ A **100% client-side** day trading dashboard that combines a live multi-stock wa
 
 The dashboard is organized into three tabs, switched from the sticky header:
 
-### 1. Live Dashboard & Calculator
-The original calculator + watchlist tab.
+### 1. Live Dashboard — Watchlist & Market Monitor
+A clean, spacious live market watchlist.
 
 - **Multi-ticker watchlist** — add/remove any number of tickers, each with independent state
 - **Live data polling** — every loaded ticker refreshes every 15 s
 - **7 time ranges per ticker** — `10m / 1h / 3h / 1d / 1w / 1mo / 1y`
 - **Smart fallback chain** — Finnhub → Yahoo Finance → deterministic mock data (badge color tells you which is in use)
 - **Real-time area charts** — color-coded green/red trends, smooth `monotone` curves
-- **Mode A — Percent Calculator** — instant `(sell − buy) / buy × 100` as you type
-- **Mode B — Position Calculator** — shares × price difference with a "Use live price" button that pulls from the active ticker; logs persist
-- **Simulation log** — every logged calculation kept in `localStorage` (last 50), with relative timestamps and per-row delete
+- **OHLC stats** — Open / High / Low / Previous Close per ticker
+- **Search & load** — type any symbol and press Load to fetch live data
 
 ### 2. Daily Goal & Risk Manager
 Goal-tracking, active position management, and per-trade profit/loss matrices.
@@ -51,10 +50,10 @@ Goal-tracking, active position management, and per-trade profit/loss matrices.
 - **Today's Closed Trades table** — symbol / shares / buy / sell / profit / time, with a one-click "Clear all"
 
 ### 3. Journal & Reports
-Long-term performance review, lessons-learned timeline, calendar journal, and full reporting.
+Long-term performance review, lessons-learned timeline, calendar journal, retroactive trade entry, inline trade editing/deletion, and full reporting.
 
 - **Backup & Restore panel** (also surfaced in the global header)
-  - **Export Backup** — downloads `trading_dashboard_backup_YYYY-MM-DD.json` containing every `localStorage` slice (active trades, completed trades, daily goal, journal notes, simulations) wrapped with version + timestamp
+  - **Export Backup** — downloads `trading_dashboard_backup_YYYY-MM-DD.json` containing every `localStorage` slice (active trades, completed trades, daily goal, journal notes) wrapped with version + timestamp
   - **Import Backup** — file picker; validates structural keys, alerts on invalid files, asks for confirmation before overwrite, then dispatches an event that **remounts the entire DashboardProvider** so every screen reflects the restored state with zero manual page reload
 - **Reporting Window filter** — single source of truth for the chart and the report below: `Today / This Week / This Month / This Quarter / Custom (start–end date pickers)`
 - **Equity Curve chart** — premium Recharts AreaChart:
@@ -66,9 +65,21 @@ Long-term performance review, lessons-learned timeline, calendar journal, and fu
   - Each day shows that day's net P/L color-coded green/red/gray
   - Today is ringed in emerald
   - A pencil icon appears on any day with a saved note
-  - Click any day to open the Daily Note Modal
+  - Click any day to open the **Daily Management Console Modal**
+- **Daily Management Console Modal** — 2-tab modal for any calendar day:
+  - **Tab: Notes** — textarea for daily reflections ("what went well", "why did I lose"), saves instantly to `localStorage`. Esc and click-outside dismiss.
+  - **Tab: Show Details** — complete drill-down of all trades logged on that specific day:
+    - Displays: Symbol / Shares / Buy → Sell / P/L (color-coded)
+    - **Edit (pencil icon)** — turns the row into inline inputs; modify symbol/shares/buy/sell, recalculates `profitUSD` automatically, saves
+    - **Delete (trash icon)** — shows confirmation ("Are you sure? This will recalculate all historical reports."), then removes the trade from `completedTrades`
+    - **Reactive cascade** — editing or deleting a trade instantly updates the calendar cell color/total, the monthly summary banner, the equity curve, the daily goal tracker (if the trade belongs to today), and all range reports
+- **Log Historical Trade form** — backfill completed buys/sells for past dates:
+  - Inputs: Date Picker (capped at today) / Symbol / Shares / Avg Buy Price / Avg Sell Price
+  - Live "Calculated P/L" preview
+  - On submit, the trade is inserted into `completedTrades` with a timestamp anchored at noon local on the chosen day
+  - Immediately reflects in the Performance Calendar, Monthly Balance Summary, and Equity Curve
+  - Success notification with auto-dismiss
 - **Monthly Summary Banner** — net P/L + total trades + active days for the visible month
-- **Daily Note Modal** — type any reflection ("what went well", "why did I lose"), saves instantly to `localStorage`. Esc and click-outside dismiss. Keyboard-friendly.
 - **Lessons Learned timeline** — every day with a note, sorted newest first, badged with that day's net P/L and trade count, inline delete
 - **Date-Range Report** — 8 stat cards driven by the same Reporting Window: Net P/L · Total Trades · Wins (with win-rate %) · Losses · Best Day · Worst Day · Breakeven · Avg / Trade
 
@@ -76,7 +87,7 @@ Long-term performance review, lessons-learned timeline, calendar journal, and fu
 
 ## Data Model & Persistence
 
-All app state lives in `localStorage` under five keyed slices:
+All app state lives in `localStorage` under four keyed slices:
 
 | Field              | localStorage key                       | Shape |
 |--------------------|----------------------------------------|-------|
@@ -84,7 +95,6 @@ All app state lives in `localStorage` under five keyed slices:
 | `completedTrades`  | `calculatemywin_completed_trades`      | `CompletedTrade[]` (max 200) |
 | `dailyGoal`        | `calculatemywin_daily_goal`            | `{ min, max }` |
 | `dailyJournalNotes`| `calculatemywin_journal_notes`         | `Record<YYYY-MM-DD, DailyJournalNote>` |
-| `simulations`      | `calculatemywin_simulations`           | `StockSimulation[]` (max 50) |
 
 The backup file is a single JSON document:
 
@@ -97,13 +107,16 @@ The backup file is a single JSON document:
     "activeTrades":      [ ... ],
     "completedTrades":   [ ... ],
     "dailyGoal":         { "min": 1000, "max": 2000 },
-    "dailyJournalNotes": { "2026-05-30": { ... } },
-    "simulations":       [ ... ]
+    "dailyJournalNotes": { "2026-05-30": { ... } }
   }
 }
 ```
 
 A legacy raw-JSON shape (without the `version`/`data` envelope) is also accepted on import for backwards compatibility.
+
+### Legacy Storage Cleanup
+
+The app automatically purges obsolete `localStorage` keys (e.g., `calculatemywin_simulations` from earlier versions) on boot and after every backup restore.
 
 ---
 
@@ -111,20 +124,18 @@ A legacy raw-JSON shape (without the `version`/`data` envelope) is also accepted
 
 ```
 src/
-├── App.tsx                         # Provider wrapper · listens for backup-restore event
+├── App.tsx                         # Provider wrapper · listens for backup-restore event · purges legacy keys
 ├── main.tsx
 ├── index.css                       # Tailwind import + chart fade-in keyframe
 ├── types/index.ts                  # All shared TypeScript interfaces
 ├── utils/
 │   ├── format.ts                   # USD / percent / color / date helpers
-│   ├── calculations.ts             # Pure calc functions
-│   └── backup.ts                   # Export / validate / apply / read-file
+│   └── backup.ts                   # Export / validate / apply / read-file · purgeLegacyStorageKeys
 ├── services/
 │   └── stockService.ts             # Finnhub + Yahoo + mock fallback chain
 ├── hooks/
-│   ├── useTrades.ts                # Active + completed + daily goal
+│   ├── useTrades.ts                # Active + completed + daily goal · addCompletedTrade / updateCompletedTrade / deleteCompletedTrade
 │   ├── useJournal.ts               # Daily journal notes
-│   ├── useSimulations.ts           # Calculator log
 │   └── usePerformanceData.ts       # Equity curve + drawdown summary
 ├── context/
 │   └── DashboardContext.tsx        # Aggregated provider
@@ -137,11 +148,8 @@ src/
     ├── TickerGrid.tsx
     ├── StockTickerPanel.tsx
     ├── PriceChart.tsx
-    ├── PercentCalculator.tsx       # Tab 1 — Mode A
-    ├── PositionCalculator.tsx      # Tab 1 — Mode B
-    ├── SimulationLog.tsx           # Tab 1 — log
     ├── RiskManagerTab.tsx          # Tab 2 — daily goal + active positions + closed table
-    ├── JournalReportsTab.tsx       # Tab 3 — calendar + notes + range report
+    ├── JournalReportsTab.tsx       # Tab 3 — calendar + notes + historical trade form + range report
     └── EquityCurveChart.tsx        # Tab 3 — equity curve + drawdown stats
 ```
 
@@ -213,6 +221,9 @@ The validator only writes sections whose shape it recognizes, so a partial or ol
 - **The Provider has a `key` that bumps on backup-restore** — forces a clean remount, the simplest correct way to make every hook re-read storage
 - **Refs over re-renders for polling** — the 15 s ticker poll uses a `tickersRef` so the interval never restarts on every state change
 - **Each ticker is independent** — range, quote, chart, and source are per-ticker, never shared
+- **Retroactive trade entry** — the historical trade form anchors timestamps at noon local on the chosen day to avoid timezone drift
+- **Inline trade editing** — updating a trade recalculates `profitUSD = (sell − buy) × shares` automatically and cascades to every consumer (calendar, chart, goal banner, reports)
+- **Confirmation before destructive actions** — deleting a trade prompts "Are you sure? This will recalculate all historical reports."
 
 ---
 

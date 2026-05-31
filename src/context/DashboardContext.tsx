@@ -9,14 +9,12 @@ import {
 import type {
   Ticker,
   ChartRange,
-  StockSimulation,
   ActiveTrade,
   CompletedTrade,
   DailyGoal,
   DailyJournalNote,
 } from '../types'
 import { fetchStockData, POLL_MS } from '../services/stockService'
-import { useSimulations } from '../hooks/useSimulations'
 import { useTrades } from '../hooks/useTrades'
 import { useJournal } from '../hooks/useJournal'
 
@@ -33,13 +31,6 @@ interface DashboardContextValue {
   setTickerRange: (id: string, range: ChartRange) => Promise<void>
   setActiveTicker: (id: string) => void
 
-  simulations: StockSimulation[]
-  addSimulation: (
-    entry: Omit<StockSimulation, 'id' | 'timestamp'>
-  ) => StockSimulation
-  removeSimulation: (id: string) => void
-  clearAll: () => void
-
   activeTrades: ActiveTrade[]
   completedTrades: CompletedTrade[]
   todayCompleted: CompletedTrade[]
@@ -52,6 +43,12 @@ interface DashboardContextValue {
   removeActiveTrade: (id: string) => void
   closeTrade: (id: string, sellPrice: number) => CompletedTrade | null
   clearCompletedTrades: () => void
+  addCompletedTrade: (input: Omit<CompletedTrade, 'id'>) => CompletedTrade
+  updateCompletedTrade: (
+    id: string,
+    updates: Partial<Omit<CompletedTrade, 'id'>>
+  ) => void
+  deleteCompletedTrade: (id: string) => void
 
   journalNotes: Record<string, DailyJournalNote>
   setJournalNote: (dateStr: string, note: string) => void
@@ -96,7 +93,6 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     tickersRef.current = tickers
   }, [tickers])
 
-  const simulationsHook = useSimulations()
   const tradesHook = useTrades()
   const journalHook = useJournal()
 
@@ -239,7 +235,6 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     refreshTicker,
     setTickerRange,
     setActiveTicker: setActiveTickerId,
-    ...simulationsHook,
     ...tradesHook,
     ...journalHook,
   }
