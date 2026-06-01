@@ -13,7 +13,7 @@ export function TickerGrid() {
         <div>
           <h2 className="text-sm font-semibold text-zinc-100">Watchlist</h2>
           <p className="text-xs text-zinc-500 mt-0.5">
-            {tickers.length} tracked · refreshing every 15s
+            {tickers.length} tracked · refreshing every 30s
           </p>
         </div>
         <button

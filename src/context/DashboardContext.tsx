@@ -105,17 +105,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const loadTicker = async (
     id: string,
     targetSymbol: string,
-    range: ChartRange
+    range: ChartRange,
+    isPolling = false
   ) => {
     const upper = targetSymbol.trim().toUpperCase()
     if (!upper) return
 
-    setTickers((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, loading: true, error: null } : t))
-    )
+    // Only show loading spinner on initial fetch, not during polling
+    if (!isPolling) {
+      setTickers((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, loading: true, error: null } : t))
+      )
+    }
 
     try {
-      const result = await fetchStockData(upper, range)
+      const result = await fetchStockData(upper, range, isPolling)
       setTickers((prev) =>
         prev.map((t) =>
           t.id === id
@@ -128,22 +132,31 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                 overlay: result.overlay,
                 loading: false,
                 lastUpdated: Date.now(),
+                // Clear any previous errors on successful fetch
+                error: null,
               }
             : t
         )
       )
     } catch (err) {
-      setTickers((prev) =>
-        prev.map((t) =>
-          t.id === id
-            ? {
-                ...t,
-                loading: false,
-                error: err instanceof Error ? err.message : 'Unknown error',
-              }
-            : t
+      // During polling, don't overwrite the UI with errors
+      // Let the stale-while-revalidate pattern handle it
+      if (!isPolling) {
+        setTickers((prev) =>
+          prev.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  loading: false,
+                  error: err instanceof Error ? err.message : 'Unknown error',
+                }
+              : t
+          )
         )
-      )
+      } else {
+        console.warn(`[Poll] Silent error for ticker ${id}:`, err)
+        // Don't update state on polling errors - keep showing stale data
+      }
     }
   }
 
@@ -185,11 +198,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     await loadTicker(id, targetSymbol, ticker.range)
   }
 
-  const refreshTicker = async (id: string) => {
+  const refreshTicker = async (id: string, isPolling = false) => {
     const ticker = tickersRef.current.find((t) => t.id === id)
     if (!ticker || !ticker.symbol) return
 
-    await loadTicker(id, ticker.symbol, ticker.range)
+    await loadTicker(id, ticker.symbol, ticker.range, isPolling)
   }
 
   const setTickerRange = async (id: string, range: ChartRange) => {
@@ -215,13 +228,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Optimized 30-second polling loop
+  // Only fetches volatile data (live price) - static data is cached
   useEffect(() => {
     const interval = setInterval(() => {
       const current = tickersRef.current
 
       for (const ticker of current) {
         if (!ticker.symbol || ticker.loading) continue
-        refreshTicker(ticker.id)
+        // Pass isPolling=true to trigger cache-optimized fetch
+        refreshTicker(ticker.id, true)
       }
     }, POLL_MS)
 
