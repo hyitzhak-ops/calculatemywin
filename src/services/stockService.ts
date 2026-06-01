@@ -182,6 +182,42 @@ async function safeFetch<T>(
   }
 }
 
+/**
+ * Retry a fetcher with exponential backoff. Used for critical paths where we
+ * really want to succeed (e.g. pre-market boundaries, overlay data).
+ *
+ * Tries up to `maxAttempts` times with delays: 0ms, 800ms, 1600ms.
+ * Returns `null` if all attempts return null/falsy or throw.
+ */
+async function fetchWithRetry<T>(
+  name: string,
+  fetcher: () => Promise<T | null>,
+  maxAttempts = 3
+): Promise<T | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      const delay = 800 * Math.pow(2, attempt - 1)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      console.info(`[${name}] retry attempt ${attempt + 1}/${maxAttempts}`)
+    }
+
+    try {
+      const result = await fetcher()
+      if (result !== null && result !== undefined) {
+        if (attempt > 0) {
+          console.info(`[${name}] ✓ succeeded on attempt ${attempt + 1}`)
+        }
+        return result
+      }
+    } catch (err) {
+      console.warn(`[${name}] attempt ${attempt + 1} threw:`, err)
+    }
+  }
+
+  console.warn(`[${name}] all ${maxAttempts} attempts failed`)
+  return null
+}
+
 async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
   let apiKey = import.meta.env.VITE_FINNHUB_API_KEY?.trim() || ''
 
@@ -243,34 +279,85 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
   }
 }
 
-async function fetchOverlay(
-  symbol: string,
-  range: ChartRange,
-  windowStart?: number,
-  windowEnd?: number
-): Promise<OverlayPoint[]> {
-  if (symbol === MARKET_OVERLAY_SYMBOL) return [] // don't overlay SPY on itself
+/**
+ * Dedicated fetcher for Pre-Market High/Low boundaries.
+ *
+ * Always uses 1-minute candles + 1-day range + includePrePost=true to ensure
+ * we capture the full 04:00-09:30 ET pre-market window with maximum granularity.
+ *
+ * This runs IN PARALLEL to the main chart fetch, regardless of the user's
+ * selected range. So even if the user is viewing "1mo" (where the main chart
+ * doesn't include intraday/pre-market data), we still get accurate PM levels.
+ *
+ * Returns null if fetch fails OR if no pre-market candles exist for today
+ * (e.g. weekend, after-hours session not yet started, illiquid stock with
+ * no pre-market activity).
+ */
+async function fetchPreMarketLevels(
+  symbol: string
+): Promise<{ preMarketHigh?: number; preMarketLow?: number } | null> {
+  const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    symbol
+  )}?interval=1m&range=1d&includePrePost=true`
 
-  const result = await safeFetch('SPY-overlay', () =>
-    fetchYahooData(MARKET_OVERLAY_SYMBOL, range)
-  )
-  if (!result || result.chart.length === 0) return []
+  const proxies = [
+    `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+  ]
 
-  let series = result.chart
-  if (windowStart !== undefined && windowEnd !== undefined) {
-    series = series.filter(
-      (p) => p.timestamp >= windowStart && p.timestamp <= windowEnd
-    )
-    if (series.length < 2) series = result.chart
+  for (const proxyUrl of proxies) {
+    try {
+      const response = await fetch(proxyUrl)
+      if (!response.ok) continue
+
+      const data = await response.json()
+      const result = data?.chart?.result?.[0]
+      if (!result) continue
+
+      const timestamps: number[] = result.timestamp || []
+      const highs: (number | null)[] = result.indicators?.quote?.[0]?.high || []
+      const lows: (number | null)[] = result.indicators?.quote?.[0]?.low || []
+      const closes: (number | null)[] = result.indicators?.quote?.[0]?.close || []
+
+      let preMarketHigh: number | undefined
+      let preMarketLow: number | undefined
+
+      for (let i = 0; i < timestamps.length; i++) {
+        const ts = timestamps[i] * 1000
+        if (!isPreMarketTimestamp(ts)) continue
+
+        const candleHigh = highs[i] ?? closes[i]
+        const candleLow = lows[i] ?? closes[i]
+        if (candleHigh === null || candleHigh === undefined) continue
+        if (candleLow === null || candleLow === undefined) continue
+
+        if (preMarketHigh === undefined || candleHigh > preMarketHigh) {
+          preMarketHigh = candleHigh
+        }
+        if (preMarketLow === undefined || candleLow < preMarketLow) {
+          preMarketLow = candleLow
+        }
+      }
+
+      // Successfully fetched data, even if no PM candles exist (weekend/illiquid)
+      if (preMarketHigh !== undefined && preMarketLow !== undefined) {
+        console.info(
+          `[PreMarket] ✓ Fetched for ${symbol}: H $${preMarketHigh.toFixed(2)} L $${preMarketLow.toFixed(2)}`
+        )
+        return { preMarketHigh, preMarketLow }
+      }
+
+      // No pre-market data found, but the API responded — don't retry
+      console.info(`[PreMarket] No pre-market candles for ${symbol} (weekend or illiquid)`)
+      return { preMarketHigh: undefined, preMarketLow: undefined }
+    } catch {
+      continue
+    }
   }
 
-  const baseline = series[0]?.price
-  if (!baseline) return []
-
-  return series.map((p) => ({
-    timestamp: p.timestamp,
-    pctChange: ((p.price - baseline) / baseline) * 100,
-  }))
+  // All proxies failed — let caller retry if needed
+  console.warn(`[PreMarket] All proxies failed for ${symbol}`)
+  return null
 }
 
 const INTRADAY_RANGES: ChartRange[] = ['10m', '1h', '3h', '1d']
@@ -521,24 +608,98 @@ export async function fetchStockData(
   if (isPolling && cached) {
     console.info(`[Fetch:Poll] Fetching live price only for ${symbol}`)
 
+    // Check if cache is missing critical static data (PM levels or overlay).
+    // If so, kick off a SILENT backfill in the background so the next poll
+    // cycle has complete data. This handles the case where the initial fetch
+    // succeeded for the chart but failed for PM/overlay.
+    const isMissingPM =
+      cached.preMarketHigh === undefined && cached.preMarketLow === undefined
+    const isMissingOverlay =
+      symbol !== MARKET_OVERLAY_SYMBOL && cached.overlay.length === 0
+
+    if (isMissingPM || isMissingOverlay) {
+      console.info(
+        `[Fetch:Poll] Backfilling missing static data for ${symbol}` +
+          ` · PM missing: ${isMissingPM} · Overlay missing: ${isMissingOverlay}`
+      )
+
+      // Fire-and-forget backfill — don't block the polling response
+      void (async () => {
+        const tasks: Promise<void>[] = []
+
+        if (isMissingPM) {
+          tasks.push(
+            fetchWithRetry('PreMarket-Backfill', () => fetchPreMarketLevels(symbol)).then(
+              (pm) => {
+                if (pm && (pm.preMarketHigh !== undefined || pm.preMarketLow !== undefined)) {
+                  const updated = staticCache.get(getCacheKey(symbol, range))
+                  if (updated) {
+                    updated.preMarketHigh = pm.preMarketHigh
+                    updated.preMarketLow = pm.preMarketLow
+                    setStaticCache(symbol, range, updated)
+                    console.info(`[Fetch:Poll] ✓ PM backfilled for ${symbol}`)
+                  }
+                }
+              }
+            )
+          )
+        }
+
+        if (isMissingOverlay) {
+          tasks.push(
+            fetchWithRetry('SPY-Backfill', () =>
+              fetchYahooData(MARKET_OVERLAY_SYMBOL, range)
+            ).then((overlayResult) => {
+              if (overlayResult && overlayResult.chart.length > 0) {
+                const updated = staticCache.get(getCacheKey(symbol, range))
+                if (updated && updated.chart.length > 0) {
+                  const windowStart = updated.chart[0]?.timestamp
+                  const windowEnd = updated.chart[updated.chart.length - 1]?.timestamp
+                  let series = overlayResult.chart
+                  if (windowStart !== undefined && windowEnd !== undefined) {
+                    series = series.filter(
+                      (p) => p.timestamp >= windowStart && p.timestamp <= windowEnd
+                    )
+                    if (series.length < 2) series = overlayResult.chart
+                  }
+                  const baseline = series[0]?.price
+                  if (baseline) {
+                    updated.overlay = series.map((p) => ({
+                      timestamp: p.timestamp,
+                      pctChange: ((p.price - baseline) / baseline) * 100,
+                    }))
+                    setStaticCache(symbol, range, updated)
+                    console.info(`[Fetch:Poll] ✓ Overlay backfilled for ${symbol}`)
+                  }
+                }
+              }
+            })
+          )
+        }
+
+        await Promise.allSettled(tasks)
+      })()
+    }
+
     const finnhubQuote = await safeFetch('Finnhub', () => fetchFinnhubQuote(symbol))
 
     if (finnhubQuote) {
-      // Merge live price with cached static data
+      // Merge live price with cached static data (re-read in case backfill ran)
+      const freshCache = staticCache.get(getCacheKey(symbol, range)) ?? cached
       const mergedQuote: StockQuote = {
         ...finnhubQuote,
-        preMarketHigh: finnhubQuote.preMarketHigh ?? cached.preMarketHigh,
-        preMarketLow: finnhubQuote.preMarketLow ?? cached.preMarketLow,
-        gapDollar: finnhubQuote.gapDollar ?? cached.gapDollar,
-        gapPercent: finnhubQuote.gapPercent ?? cached.gapPercent,
+        preMarketHigh: finnhubQuote.preMarketHigh ?? freshCache.preMarketHigh,
+        preMarketLow: finnhubQuote.preMarketLow ?? freshCache.preMarketLow,
+        gapDollar: finnhubQuote.gapDollar ?? freshCache.gapDollar,
+        gapPercent: finnhubQuote.gapPercent ?? freshCache.gapPercent,
       }
 
       console.info(`[Fetch:Poll] ✓ Live price updated for ${symbol}, static data from cache`)
       return {
         quote: mergedQuote,
-        chart: cached.chart,
+        chart: freshCache.chart,
         source: 'finnhub',
-        overlay: cached.overlay,
+        overlay: freshCache.overlay,
       }
     }
 
@@ -546,9 +707,11 @@ export async function fetchStockData(
     // Return cached data (stale but valid) rather than blanking the UI
     console.warn(`[Fetch:Poll] Price fetch failed for ${symbol}, using cached data (stale-while-revalidate)`)
 
+    const freshCache = staticCache.get(getCacheKey(symbol, range)) ?? cached
+
     // Reconstruct quote from cached data (use last known price)
-    if (cached.chart.length > 0) {
-      const lastCandle = cached.chart[cached.chart.length - 1]
+    if (freshCache.chart.length > 0) {
+      const lastCandle = freshCache.chart[freshCache.chart.length - 1]
       const staleQuote: StockQuote = {
         symbol,
         price: lastCandle.price,
@@ -559,69 +722,117 @@ export async function fetchStockData(
         open: lastCandle.price,
         previousClose: lastCandle.price,
         isMock: false,
-        preMarketHigh: cached.preMarketHigh,
-        preMarketLow: cached.preMarketLow,
-        gapDollar: cached.gapDollar,
-        gapPercent: cached.gapPercent,
+        preMarketHigh: freshCache.preMarketHigh,
+        preMarketLow: freshCache.preMarketLow,
+        gapDollar: freshCache.gapDollar,
+        gapPercent: freshCache.gapPercent,
       }
 
       return {
         quote: staleQuote,
-        chart: cached.chart,
+        chart: freshCache.chart,
         source: 'finnhub',
-        overlay: cached.overlay,
+        overlay: freshCache.overlay,
       }
     }
   }
 
   // ── FULL FETCH: Initial load or cache miss ──
-  // Fetch ALL data (quote + chart + overlay + pre-market boundaries).
+  // Fetch ALL data (quote + chart + overlay + pre-market boundaries) IN PARALLEL.
   // This happens ONCE per symbol when first loaded or range changed.
+  //
+  // Pre-market levels and SPY overlay are fetched via DEDICATED endpoints with
+  // retry logic, so they succeed independently of the main chart fetch.
   console.info(`[Fetch:Full] Fetching complete dataset for ${symbol} (${range})`)
 
-  const [finnhubQuote, yahooData] = await Promise.all([
+  const isOverlaySymbol = symbol === MARKET_OVERLAY_SYMBOL
+
+  const [finnhubQuote, yahooData, preMarketLevels, overlayResult] = await Promise.all([
+    // Live quote (Finnhub)
     safeFetch('Finnhub', () => fetchFinnhubQuote(symbol)),
-    safeFetch('Yahoo', () => fetchYahooData(symbol, range)),
+    // Main chart (Yahoo) — uses user-selected range
+    fetchWithRetry('Yahoo', () => fetchYahooData(symbol, range)),
+    // Pre-market levels — ALWAYS fetched with 1m granularity for accuracy
+    fetchWithRetry('PreMarket', () => fetchPreMarketLevels(symbol)),
+    // SPY overlay — fetched in parallel for any non-SPY symbol
+    isOverlaySymbol
+      ? Promise.resolve(null)
+      : fetchWithRetry('SPY-overlay-data', () =>
+          fetchYahooData(MARKET_OVERLAY_SYMBOL, range)
+        ),
   ])
 
-  // Pull SPY overlay in parallel only when we actually have a chart to overlay against
-  const primaryChart = yahooData?.chart ?? null
-  const windowStart = primaryChart?.[0]?.timestamp
-  const windowEnd = primaryChart?.[primaryChart.length - 1]?.timestamp
-
+  // Build SPY overlay from the resolved overlay data
   let overlay: OverlayPoint[] = []
-  if (primaryChart && primaryChart.length > 1) {
-    overlay = await fetchOverlay(symbol, range, windowStart, windowEnd)
+  if (overlayResult && overlayResult.chart.length > 0 && yahooData?.chart) {
+    const primaryChart = yahooData.chart
+    const windowStart = primaryChart[0]?.timestamp
+    const windowEnd = primaryChart[primaryChart.length - 1]?.timestamp
+
+    let series = overlayResult.chart
+    if (windowStart !== undefined && windowEnd !== undefined) {
+      series = series.filter(
+        (p) => p.timestamp >= windowStart && p.timestamp <= windowEnd
+      )
+      if (series.length < 2) series = overlayResult.chart
+    }
+
+    const baseline = series[0]?.price
+    if (baseline) {
+      overlay = series.map((p) => ({
+        timestamp: p.timestamp,
+        pctChange: ((p.price - baseline) / baseline) * 100,
+      }))
+    }
   }
 
-  // Backfill pre-market data from Yahoo onto a Finnhub-primary quote
-  const mergedQuote = finnhubQuote
+  // Resolve pre-market levels: dedicated fetcher takes priority,
+  // fall back to the values embedded in the main chart fetch
+  const finalPreMarketHigh =
+    preMarketLevels?.preMarketHigh ?? yahooData?.quote.preMarketHigh
+  const finalPreMarketLow =
+    preMarketLevels?.preMarketLow ?? yahooData?.quote.preMarketLow
+
+  // Resolve gap from any available source
+  const finalGapDollar = finnhubQuote?.gapDollar ?? yahooData?.quote.gapDollar
+  const finalGapPercent = finnhubQuote?.gapPercent ?? yahooData?.quote.gapPercent
+
+  // Build merged quote — prefer Finnhub price, augment with all static metadata
+  const mergedQuote: StockQuote | null = finnhubQuote
     ? {
         ...finnhubQuote,
-        preMarketHigh:
-          finnhubQuote.preMarketHigh ?? yahooData?.quote.preMarketHigh,
-        preMarketLow:
-          finnhubQuote.preMarketLow ?? yahooData?.quote.preMarketLow,
-        gapDollar:
-          finnhubQuote.gapDollar ?? yahooData?.quote.gapDollar,
-        gapPercent:
-          finnhubQuote.gapPercent ?? yahooData?.quote.gapPercent,
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
       }
-    : null
+    : yahooData
+      ? {
+          ...yahooData.quote,
+          preMarketHigh: finalPreMarketHigh,
+          preMarketLow: finalPreMarketLow,
+          gapDollar: finalGapDollar,
+          gapPercent: finalGapPercent,
+        }
+      : null
 
   // ── Cache static data for future polling cycles ──
-  if (yahooData || mergedQuote) {
+  if (mergedQuote || yahooData) {
     const staticData: StaticDataCache = {
-      preMarketHigh: mergedQuote?.preMarketHigh ?? yahooData?.quote.preMarketHigh,
-      preMarketLow: mergedQuote?.preMarketLow ?? yahooData?.quote.preMarketLow,
-      gapDollar: mergedQuote?.gapDollar ?? yahooData?.quote.gapDollar,
-      gapPercent: mergedQuote?.gapPercent ?? yahooData?.quote.gapPercent,
+      preMarketHigh: finalPreMarketHigh,
+      preMarketLow: finalPreMarketLow,
+      gapDollar: finalGapDollar,
+      gapPercent: finalGapPercent,
       chart: yahooData?.chart ?? [],
-      overlay: overlay,
+      overlay,
       fetchedAt: Date.now(),
     }
     setStaticCache(symbol, range, staticData)
-    console.info(`[Fetch:Full] ✓ Static data cached for ${symbol} (${range})`)
+    console.info(
+      `[Fetch:Full] ✓ Static data cached for ${symbol} (${range})` +
+        ` · PM: ${finalPreMarketHigh ? `H $${finalPreMarketHigh.toFixed(2)}/L $${finalPreMarketLow?.toFixed(2)}` : 'none'}` +
+        ` · Overlay: ${overlay.length} points`
+    )
   }
 
   if (mergedQuote && yahooData) {
@@ -629,23 +840,23 @@ export async function fetchStockData(
     return {
       quote: mergedQuote,
       chart: yahooData.chart,
-      source: 'finnhub',
+      source: finnhubQuote ? 'finnhub' : 'yahoo',
       overlay,
     }
   }
 
-  if (mergedQuote) {
+  if (mergedQuote && finnhubQuote) {
     console.info(`[Fetch:Full] Using Finnhub quote + mock chart for ${symbol}`)
     const mockChart = generateMockChartFromQuote(mergedQuote, range)
 
-    // Cache the mock chart too
+    // Cache the mock chart too — but preserve the real PM/overlay data we got
     setStaticCache(symbol, range, {
-      preMarketHigh: mergedQuote.preMarketHigh,
-      preMarketLow: mergedQuote.preMarketLow,
-      gapDollar: mergedQuote.gapDollar,
-      gapPercent: mergedQuote.gapPercent,
+      preMarketHigh: finalPreMarketHigh,
+      preMarketLow: finalPreMarketLow,
+      gapDollar: finalGapDollar,
+      gapPercent: finalGapPercent,
       chart: mockChart,
-      overlay: [],
+      overlay,
       fetchedAt: Date.now(),
     })
 
@@ -653,14 +864,20 @@ export async function fetchStockData(
       quote: mergedQuote,
       chart: mockChart,
       source: 'finnhub',
-      overlay: [],
+      overlay,
     }
   }
 
   if (yahooData) {
     console.info(`[Fetch:Full] Using Yahoo quote + chart for ${symbol}`)
     return {
-      quote: yahooData.quote,
+      quote: {
+        ...yahooData.quote,
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
+      },
       chart: yahooData.chart,
       source: 'yahoo',
       overlay,
