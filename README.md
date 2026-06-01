@@ -59,25 +59,81 @@ Goal-tracking, risk-based position sizing, active trade management, and per-trad
 - **Goal-reached celebration banner** — high-visibility milestone when `dailyProfit ≥ goal.min`. Explicitly **non-blocking** — every input, button, and table stays fully operational past the goal. Live chips show `+$X over goal` and `well above max` when applicable.
 - **Down-day advisory** — gentle red banner if you're net negative for the day
 
-#### Corporate Risk Assessment Scanner (NEW — Fundamental Pre-Trade Guard)
-Before you enter a position, the "+ Add Position" form now automatically scans for **toxic capital structures** and catalyst hazards:
+#### Corporate Risk Assessment Scanner — 1-Year DNA Profiling (Fundamental Pre-Trade Guard)
+Before you enter a position, the "+ Add Position" form automatically scans for **toxic capital structures** and catalyst hazards:
 
 - **Debounced real-time scanning** — as you type a symbol, a 600ms-debounced scan fires against Finnhub endpoints:
-  - **Vector A — Share Dilution / Toxic Financing** (60-day lookback): company news scanned for keywords `Offering`, `S-3`, `F-3`, `Prospectus`, `ATM`, `Convertible Note`, `Private Placement`, `PIPE`, `Warrant`. Distinguishes institutional deals (hedge-fund convertibles) from public offerings. **+4 pts** when ≤14d, **+2 pts** when older.
-  - **Vector B — Reverse Split Risk** (−30d / +7d): splits calendar + headline fallback for scheduled or recently executed reverse splits. Parses `1-for-N` ratios, flags NASDAQ listing-compliance triggers. **+5 pts**.
-  - **Vector C — Earnings Proximity** (+120d forward, −14d back): **+3 pts** if earnings within 3 trading days (with BMO/AMC session label). Informational flag for recently-reported earnings (≤14d) with EPS beat/miss surprise.
+  - **Vector A — Share Dilution / Toxic Financing** (1-year lookback): company news scanned for keywords `Offering`, `S-3`, `F-3`, `Prospectus`, `ATM`, `Convertible Note`, `Private Placement`, `PIPE`, `Warrant`. Distinguishes institutional deals (hedge-fund convertibles) from public offerings. Events are clustered into distinct financing rounds (14-day window). **+4 pts** when ≤14d, **+2 pts** when older. **Serial Diluter Detection:** ≥3 distinct events in 12 months triggers +3 pts bonus and red "Serial Diluter" badge.
+  - **Vector B — Reverse Split Risk** (−1yr / +7d): splits calendar + headline fallback for scheduled or recently executed reverse splits. Parses `1-for-N` ratios, flags NASDAQ listing-compliance triggers. **+5 pts** for upcoming (≤7d) or recent (≤30d) splits.
+  - **Vector C — Earnings Health** (+120d forward, −30d back): **+3 pts** if earnings within 3 days (imminent binary event risk), **+1 pt** if 4-30d away. Tracks last reported earnings with EPS beat/miss surprise + revenue comparison. Health classification: Strong (beat + clean structure) / Caution (miss or imminent) / Neutral.
+- **1-Year Corporate DNA Profile** — visual timeline of all detected events (offerings, ATM, convertibles, PIPE, reverse splits), sorted newest-first with expandable list (5 shown by default). Each event shows:
+  - Event type badge (color-coded: Offering=red, ATM=orange, Convertible=rose, PIPE=pink, Rev.Split=purple)
+  - Days ago, detail headline, external source link
+  - Serial diluter warning panel when ≥3 events detected
 - **Dynamic Risk Score (1–10 scale)** with color-coded severity:
   - **1–2 (Low)** — clean emerald badge, `ShieldCheck` icon
   - **3 (Medium)** — amber warning badge, `AlertTriangle` icon
   - **4–6 (High)** — orange `Siren` icon, elevated sell-pressure warning
   - **7–10 (Toxic)** — flashing red border pulse (`animate-toxic-pulse`), `⚠️ TOXIC CAPITAL STRUCTURE DETECTED` badge, explicit summary: *"Heavy sell pressure expected. This is a dangerous vehicle for swing exposure."*
+- **Earnings Health Section** — dedicated panel showing:
+  - Next report date (countdown with BMO/AMC session label, color-coded by proximity)
+  - Last reported date with EPS surprise badge (Beat/Miss/In-line) and actual vs. estimate
+  - Revenue comparison (actual vs. estimate with %-delta)
+  - Health recommendation (Strong/Caution/Neutral) with reasoning
 - **Per-flag detail rows** — each active flag shows:
-  - Title (e.g., `Active Dilution / Toxic Financing`)
-  - Detail string with source/date context (e.g., *"Institutional deal (likely PIPE) · 'XYZ files $50M offering' (Reuters, 5d ago)"*)
+  - Title (e.g., `Active Dilution / Toxic Financing`, `Serial Diluter`, `Imminent Earnings`)
+  - Detail string with source/date context
   - Score delta (`+4 pts`), days-ago/days-until metadata, external source link when available
 - **Fault-tolerant by design** — uses `Promise.allSettled` so partial API failures still surface whatever data succeeded. Panel shows `partial scan` badge + errors array when applicable. Without a Finnhub key, renders a non-blocking offline notice; form submission remains fully available.
 - **Purely advisory** — the scanner **never blocks** order entry. Explicit footer: *"Advisory only — execution remains in your control. Flags do not block order entry."*
-- **Visual treatment** — loading skeleton with spinner during scan, gradient risk meter bar, flashing red pulse animation for toxic-tier scores
+- **Visual treatment** — loading skeleton with spinner during scan, gradient risk meter bar, flashing red pulse animation for toxic-tier scores, collapsible DNA timeline, health-coded earnings panel
+
+#### Catalyst & Edge Intelligence Scanner (NEW — Strategic Opportunity Detection)
+Immediately below the Corporate Risk Scanner, an advanced **3-bucket intelligence engine** scans 60 days of news to identify high-conviction trading setups:
+
+- **🧬 Bucket 1: Biotech & FDA Pipeline Intelligence**
+  - **Scans for:** Clinical trial outcomes (Phase 1/2/3 results), FDA approvals/rejections, CRL (Complete Response Letters), trial halts, discontinuations, breakthrough therapy designations, NDA/BLA acceptances
+  - **Special Logic: Biotech Overreaction Detection** — when a major negative event (trial failure, CRL) is detected BUT the company has positive pipeline signals (approvals, successful trials on other assets), triggers a 🔵 **"Biotech Bounce Setup"** alert card
+  - **Alert displays:**
+    - Blue gradient card with asymmetric upside badge
+    - Crash keywords extracted (e.g., "phase 3 failure", "crl", "discontinued")
+    - Pipeline strength keywords (e.g., "fda approval", "met primary endpoint")
+    - Reasoning: *"Major crash on single asset failure, but company retains active secondary pipeline. Potential asymmetrical reward play."*
+  - **Badge:** "Medium-Risk with Asymmetric Upside" (no automatic risk adjustment — flagged for manual discretion)
+  - **Use case:** 80-90% biotech crashes where market overreacted to single data point while ignoring broader pipeline
+
+- **🟢 Bucket 2: Corporate M&A, Deals & Partnerships**
+  - **Scans for:** Acquisitions, mergers, strategic partnerships, joint ventures, licensing agreements, multi-million/billion contracts, supply/distribution agreements
+  - **Signal:** "STRATEGIC CATALYST" (positive sentiment)
+  - **Risk Impact:** Each detected deal **reduces** Corporate Risk Score by **-1 point** (capped at -2 for multiple deals)
+  - **Reasoning:** Strategic deals imply institutional backing and reduced execution risk
+  - **Use case:** Enter with confidence when major partnership/acquisition announced
+
+- **⚡ Bucket 3: AI Momentum Tracker**
+  - **Scans for:** Artificial intelligence announcements, AI integrations, generative AI deployments, machine learning platforms, LLM partnerships, AI transformation initiatives
+  - **Signal:** "AI HYPE/MOMENTUM" (positive sentiment)
+  - **Risk Impact:** AI momentum detected **reduces** risk score by **-1 point**
+  - **Reasoning:** AI hype drives retail volume and positive sentiment
+  - **Use case:** Ride momentum plays when traditional companies announce AI pivots
+
+- **Risk Score Adjustment Logic:**
+  - Adjustment range: **-3 to +3** (negative = safer, positive = riskier)
+  - Strategic deals: -1 per deal (max -2)
+  - AI momentum: -1
+  - Biotech overreaction: No automatic adjustment (separate alert flag)
+  - **Displayed prominently** in blue panel header with "(safer)" or "(riskier)" label
+
+- **Event Display:**
+  - Each bucket shows as collapsible section (3 events visible by default, "Show X more" to expand)
+  - Per-event cards show:
+    - Sentiment icon (✅ positive, 🔴 negative, ⚪ neutral)
+    - Signal type badge (uppercase, color-coded)
+    - Days ago, source name, headline (2-line clamp)
+    - Auto-generated detail with matched keywords
+    - External source link
+
+- **Purely advisory** — like the Corporate Risk Scanner, the Catalyst Scanner **never blocks** form submission. Footer: *"Advisory intelligence only — execution remains in your control."*
+- **Visual treatment:** Blue-themed panel with gradient borders, risk impact badge, special biotech overreaction card, color-coded bucket sections (purple/green/yellow), skeleton loader during scan
 
 #### Risk-Based Position Sizing
 The "+ Add Position" form is upgraded into a complete risk-management console:
@@ -215,7 +271,8 @@ src/
 │   └── backup.ts                   # Export / validate / apply / read-file · purgeLegacyStorageKeys
 ├── services/
 │   ├── stockService.ts             # Finnhub + Yahoo + mock fallback · pre-market parsing · SPY overlay
-│   └── riskScannerService.ts       # Corporate risk scanner · dilution/reverse-split/earnings vectors · score calc
+│   ├── riskScannerService.ts       # Corporate risk scanner · 1-yr DNA profiling · dilution/reverse-split/earnings vectors · score calc
+│   └── catalystScannerService.ts   # Catalyst intelligence scanner · 3-bucket classification · biotech overreaction detection · risk adjustment
 ├── hooks/
 │   ├── useTrades.ts                # Active + completed + daily goal + add/update/delete with catalyst
 │   ├── useJournal.ts               # Daily journal notes
@@ -247,7 +304,7 @@ npm install
 
 ### Optional: Finnhub API key
 
-For higher-quality live quotes **and to enable the Corporate Risk Scanner**, copy the env template:
+For higher-quality live quotes **and to enable both the Corporate Risk Scanner and Catalyst Intelligence Scanner**, copy the env template:
 
 ```bash
 cp .env.example .env
@@ -259,7 +316,7 @@ then add your free key from [finnhub.io](https://finnhub.io/):
 VITE_FINNHUB_API_KEY=your_key_here
 ```
 
-The app **works perfectly without it** — Yahoo Finance is the next fallback for quotes/charts, and the risk scanner displays a non-blocking "offline" notice. Demo data is the final fallback for price charts.
+The app **works perfectly without it** — Yahoo Finance is the next fallback for quotes/charts, and both scanners display non-blocking "offline" notices. Demo data is the final fallback for price charts.
 
 ### Run
 
@@ -311,6 +368,9 @@ The validator only writes sections whose shape it recognizes, so a partial or ol
 - **Confirmation before destructive actions** — deleting a trade prompts "Are you sure? This will recalculate all historical reports."
 - **Honest data only** — features that would require paid market-data APIs (RVOL, scanner endpoints) were deliberately *not* built rather than mock fake numbers a trader might act on
 - **Corporate risk scanner degrades gracefully** — uses `Promise.allSettled` so one failed endpoint doesn't block the others. Without an API key, shows an offline notice but never blocks form submission. The scanner is purely advisory; it surfaces hazards but execution stays in the user's control.
+- **Catalyst intelligence scanner is fully parallel** — runs independently of the Corporate Risk Scanner with its own 600ms debounce. Both scanners fire simultaneously when a symbol is entered. Keyword-based classification ensures fast, reliable pattern detection across biotech, corporate deals, and AI momentum without complex NLP dependencies.
+- **Biotech overreaction detection is conservative** — requires BOTH negative signals (trial failure, CRL) AND positive signals (approvals, successful trials) to trigger the asymmetric upside alert. This prevents false positives on pure-play failures.
+- **Risk score adjustments are capped** — catalyst-based adjustments are bounded to [-3, +3] to prevent over-optimization. Multiple strategic catalysts provide incremental confidence, not exponential certainty.
 
 ---
 

@@ -46,6 +46,11 @@ import {
   type RiskScanResult,
   type RiskSeverity,
 } from '../services/riskScannerService'
+import {
+  scanCatalystIntelligence,
+  type CatalystIntelligence,
+  type CatalystEvent,
+} from '../services/catalystScannerService'
 import { fetchStockData } from '../services/stockService'
 
 const TARGET_TIERS = [0.05, 0.1, 0.15, 0.2] as const
@@ -538,6 +543,7 @@ function AddTradeForm({ onAdd }: AddTradeFormProps) {
       }
     >
       <CorporateRiskAssessment symbol={symbol.trim()} />
+      <CatalystIntelligencePanel symbol={symbol.trim()} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mt-4">
         <div className="space-y-3">
@@ -1996,5 +2002,370 @@ function RevenueDelta({ actual, estimate }: { actual: number; estimate: number }
     >
       ({positive ? '+' : ''}{pct.toFixed(1)}%)
     </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Catalyst & Edge Intelligence Panel — Advanced 3-Bucket Scanner
+// ---------------------------------------------------------------------------
+
+const CATALYST_SCAN_DEBOUNCE_MS = 600
+
+interface CatalystIntelligencePanelProps {
+  symbol: string
+}
+
+function CatalystIntelligencePanel({ symbol }: CatalystIntelligencePanelProps) {
+  const [scan, setScan] = useState<CatalystIntelligence | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    abortRef.current?.abort()
+
+    const trimmed = symbol.trim().toUpperCase()
+    if (trimmed.length < 1) {
+      setScan(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const handle = window.setTimeout(async () => {
+      try {
+        const result = await scanCatalystIntelligence(trimmed, controller.signal)
+        if (controller.signal.aborted) return
+        setScan(result)
+      } catch (err) {
+        if (controller.signal.aborted) return
+        setError(err instanceof Error ? err.message : 'Catalyst scan failed')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }, CATALYST_SCAN_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(handle)
+      controller.abort()
+    }
+  }, [symbol])
+
+  if (!symbol) {
+    return (
+      <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-3 text-[11px] text-zinc-500 flex items-center gap-2 mt-4">
+        <Zap className="w-3.5 h-3.5 text-zinc-600" />
+        Enter a <span className="text-zinc-300">Symbol</span> to run the
+        Catalyst & Edge Intelligence Scanner (Biotech · Corporate Deals · AI Momentum).
+      </div>
+    )
+  }
+
+  if (loading && !scan) {
+    return <CatalystScanSkeleton symbol={symbol} />
+  }
+
+  if (error && !scan) {
+    return (
+      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200 flex items-center gap-2 mt-4">
+        <AlertTriangle className="w-4 h-4 text-amber-300" />
+        Catalyst scan failed: {error}. Position controls remain available.
+      </div>
+    )
+  }
+
+  if (!scan) return null
+
+  return <CatalystIntelligenceResultPanel scan={scan} refreshing={loading} />
+}
+
+function CatalystScanSkeleton({ symbol }: { symbol: string }) {
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-4 space-y-3 animate-pulse mt-4">
+      <div className="flex items-center gap-2">
+        <Loader2 className="w-4 h-4 text-zinc-400 animate-spin" />
+        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-300">
+          Scanning {symbol} · Catalyst & Edge Intelligence (60 days)
+        </span>
+      </div>
+      <div className="space-y-2">
+        <div className="h-20 rounded bg-zinc-800/40" />
+        <div className="h-20 rounded bg-zinc-800/40" />
+        <div className="h-20 rounded bg-zinc-800/40" />
+      </div>
+    </div>
+  )
+}
+
+function CatalystIntelligenceResultPanel({
+  scan,
+  refreshing,
+}: {
+  scan: CatalystIntelligence
+  refreshing: boolean
+}) {
+  const hasAnyEvents =
+    scan.buckets.biotech.length > 0 ||
+    scan.buckets.corporate.length > 0 ||
+    scan.buckets.aiMomentum.length > 0
+
+  const riskAdjustmentColor =
+    scan.riskScoreAdjustment < 0
+      ? 'text-emerald-300'
+      : scan.riskScoreAdjustment > 0
+      ? 'text-red-300'
+      : 'text-zinc-400'
+
+  return (
+    <div className="rounded-md border border-blue-500/30 bg-blue-500/5 mt-4">
+      {/* Header */}
+      <div className="p-4 border-b border-zinc-800/60">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-md flex-shrink-0 flex items-center justify-center border border-blue-400/40 bg-blue-500/15">
+            <Zap className="w-5 h-5 text-blue-300" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-blue-200">
+                Catalyst & Edge Intelligence
+              </span>
+              {refreshing && (
+                <Loader2 className="w-3 h-3 text-zinc-500 animate-spin" />
+              )}
+            </div>
+            <p className="mt-1 text-xs text-zinc-300">
+              60-day scan across Biotech pipeline events, Corporate deals, and AI momentum
+            </p>
+
+            {/* Risk adjustment badge */}
+            {scan.riskScoreAdjustment !== 0 && (
+              <div className="mt-2 inline-flex items-center gap-2 rounded border border-blue-400/40 bg-blue-500/10 px-2 py-1">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-blue-200">
+                  Risk Impact:
+                </span>
+                <span className={`text-sm font-mono font-bold ${riskAdjustmentColor}`}>
+                  {scan.riskScoreAdjustment > 0 ? '+' : ''}
+                  {scan.riskScoreAdjustment}
+                </span>
+                <span className="text-[10px] text-zinc-400">
+                  {scan.riskScoreAdjustment < 0 ? '(safer)' : '(riskier)'}
+                </span>
+              </div>
+            )}
+
+            <p className="mt-2 text-[11px] text-zinc-400 leading-snug">
+              {scan.adjustmentReason}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Biotech Overreaction Setup Alert */}
+      {scan.biotechOverreactionSetup?.detected && (
+        <div className="mx-4 mt-4 rounded-md border border-blue-400/60 bg-gradient-to-br from-blue-500/20 to-blue-500/5 p-3">
+          <div className="flex items-start gap-2">
+            <div className="flex-shrink-0 w-6 h-6 rounded bg-blue-500/30 flex items-center justify-center">
+              <span className="text-sm">🔵</span>
+            </div>
+            <div className="flex-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-blue-100 mb-1">
+                Biotech Bounce Setup Detected
+              </div>
+              <p className="text-[11px] text-blue-200/90 leading-snug mb-2">
+                {scan.biotechOverreactionSetup.reasoning}
+              </p>
+              <div className="space-y-1">
+                {scan.biotechOverreactionSetup.crashKeywords.length > 0 && (
+                  <div className="text-[10px] text-zinc-300">
+                    <span className="font-semibold text-red-300">Crash keywords:</span>{' '}
+                    {scan.biotechOverreactionSetup.crashKeywords.join(', ')}
+                  </div>
+                )}
+                {scan.biotechOverreactionSetup.pipelineStrengthKeywords.length > 0 && (
+                  <div className="text-[10px] text-zinc-300">
+                    <span className="font-semibold text-emerald-300">Pipeline strength:</span>{' '}
+                    {scan.biotechOverreactionSetup.pipelineStrengthKeywords.join(', ')}
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 inline-block text-[9px] font-bold uppercase tracking-widest bg-blue-400/80 text-zinc-950 px-2 py-0.5 rounded">
+                Medium-Risk with Asymmetric Upside
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Intelligence Buckets */}
+      <div className="p-4 space-y-3">
+        {!hasAnyEvents && (
+          <div className="rounded border border-zinc-800/60 bg-zinc-950/40 px-3 py-2.5 text-[11px] text-zinc-500 flex items-center gap-2">
+            <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
+            No strategic catalysts detected in the past 60 days. This is a neutral baseline.
+          </div>
+        )}
+
+        {/* Bucket 1: Biotech & FDA Pipeline */}
+        {scan.buckets.biotech.length > 0 && (
+          <CatalystBucketSection
+            title="🧬 Biotech & FDA Pipeline Intelligence"
+            subtitle="Clinical trial outcomes, FDA actions, pipeline developments"
+            events={scan.buckets.biotech}
+            bucketColor="purple"
+          />
+        )}
+
+        {/* Bucket 2: Corporate M&A, Deals & Partnerships */}
+        {scan.buckets.corporate.length > 0 && (
+          <CatalystBucketSection
+            title="🟢 Corporate M&A, Deals & Partnerships"
+            subtitle="Strategic value creation events — acquisitions, licensing, major contracts"
+            events={scan.buckets.corporate}
+            bucketColor="green"
+          />
+        )}
+
+        {/* Bucket 3: AI Momentum Tracker */}
+        {scan.buckets.aiMomentum.length > 0 && (
+          <CatalystBucketSection
+            title="⚡ AI Momentum Tracker"
+            subtitle="AI pivot announcements, integrations, strategic AI deployments"
+            events={scan.buckets.aiMomentum}
+            bucketColor="yellow"
+          />
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 pb-3 pt-2 border-t border-zinc-800/60">
+        <p className="text-[10px] text-zinc-500 italic leading-snug">
+          Advisory intelligence only — execution remains in your control. Sources: Finnhub company news (60d lookback).
+        </p>
+      </div>
+    </div>
+  )
+}
+
+interface CatalystBucketSectionProps {
+  title: string
+  subtitle: string
+  events: CatalystEvent[]
+  bucketColor: 'purple' | 'green' | 'yellow'
+}
+
+function CatalystBucketSection({
+  title,
+  subtitle,
+  events,
+  bucketColor,
+}: CatalystBucketSectionProps) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? events : events.slice(0, 3)
+
+  const borderColor =
+    bucketColor === 'purple'
+      ? 'border-purple-500/40'
+      : bucketColor === 'green'
+      ? 'border-emerald-500/40'
+      : 'border-yellow-500/40'
+
+  const bgColor =
+    bucketColor === 'purple'
+      ? 'bg-purple-500/5'
+      : bucketColor === 'green'
+      ? 'bg-emerald-500/5'
+      : 'bg-yellow-500/5'
+
+  return (
+    <div className={`rounded-md border ${borderColor} ${bgColor} p-3`}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-200">
+            {title}
+          </div>
+          <div className="text-[10px] text-zinc-400 mt-0.5">{subtitle}</div>
+        </div>
+        <span className="text-[10px] font-mono tabular-nums text-zinc-400">
+          {events.length} event{events.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
+        {visible.map((event, i) => (
+          <CatalystEventRow key={`${event.datetime}-${i}`} event={event} />
+        ))}
+      </div>
+
+      {events.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-2 w-full flex items-center justify-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition py-1"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="w-3 h-3" /> Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-3 h-3" />
+              Show {events.length - 3} more
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CatalystEventRow({ event }: { event: CatalystEvent }) {
+  const sentimentIcon =
+    event.sentiment === 'positive' ? '✅' : event.sentiment === 'negative' ? '🔴' : '⚪'
+
+  const sentimentColor =
+    event.sentiment === 'positive'
+      ? 'text-emerald-300'
+      : event.sentiment === 'negative'
+      ? 'text-red-300'
+      : 'text-zinc-300'
+
+  return (
+    <div className="rounded border border-zinc-800/60 bg-zinc-950/50 px-3 py-2">
+      <div className="flex items-start gap-2">
+        <span className="flex-shrink-0 text-sm mt-0.5">{sentimentIcon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className={`text-[10px] font-semibold ${sentimentColor}`}>
+              {event.signal.replace(/-/g, ' ').toUpperCase()}
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono tabular-nums">
+              {event.daysAgo}d ago
+            </span>
+            <span className="text-[10px] text-zinc-600">· {event.source}</span>
+          </div>
+          <p className="text-[11px] text-zinc-200 leading-snug mb-1 line-clamp-2">
+            {event.headline}
+          </p>
+          <p className="text-[10px] text-zinc-400 leading-snug italic">{event.detail}</p>
+          {event.url && (
+            <a
+              href={event.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-[10px] text-zinc-500 hover:text-blue-300 transition"
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              source
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
