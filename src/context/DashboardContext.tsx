@@ -94,6 +94,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const tickersRef = useRef(tickers)
   const didInitRef = useRef(false)
+  // Per-ticker in-flight guard so the 30s interval can't fire a second poll
+  // while the previous one is still running. ticker.loading only flips on
+  // initial fetch (we suppress it during polling), so we need a separate ref.
+  const pollingInFlightRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     tickersRef.current = tickers
@@ -118,8 +122,23 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       )
     }
 
+    // Outer safety timeout. fetchStockData has its own per-request timeouts,
+    // but if anything below that ever hangs we still want the UI to recover
+    // instead of leaving the refresh button stuck spinning. Worst-case real
+    // total inside fetchStockData is ~10-11s, so 25s is comfortable margin.
+    const SAFETY_TIMEOUT_MS = 25_000
+    const safetyTimeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('SAFETY_TIMEOUT')),
+        SAFETY_TIMEOUT_MS
+      )
+    )
+
     try {
-      const result = await fetchStockData(upper, range, isPolling)
+      const result = await Promise.race([
+        fetchStockData(upper, range, isPolling),
+        safetyTimeout,
+      ])
       setTickers((prev) =>
         prev.map((t) =>
           t.id === id
@@ -139,24 +158,45 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         )
       )
     } catch (err) {
-      // During polling, don't overwrite the UI with errors
-      // Let the stale-while-revalidate pattern handle it
-      if (!isPolling) {
-        setTickers((prev) =>
-          prev.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  loading: false,
-                  error: err instanceof Error ? err.message : 'Unknown error',
-                }
-              : t
-          )
-        )
-      } else {
+      const isSafetyTimeout =
+        err instanceof Error && err.message === 'SAFETY_TIMEOUT'
+
+      // During polling, never surface errors to the UI
+      if (isPolling) {
         console.warn(`[Poll] Silent error for ticker ${id}:`, err)
-        // Don't update state on polling errors - keep showing stale data
+        return
       }
+
+      // For manual refresh: if the existing ticker already has data, don't
+      // blank it out with an error message. Just clear the spinner and let
+      // the user keep the previous snapshot — same intent as the
+      // stale-while-revalidate pattern in stockService.
+      const existing = tickersRef.current.find((t) => t.id === id)
+      const hasExistingData = !!existing?.quote && existing.chart.length > 0
+
+      if (isSafetyTimeout && hasExistingData) {
+        console.warn(
+          `[Refresh] Safety timeout for ${upper}, keeping previous data`
+        )
+        setTickers((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, loading: false } : t))
+        )
+        return
+      }
+
+      const friendlyMessage = isSafetyTimeout
+        ? 'Network is slow — showing the most recent data we have. Try again in a moment.'
+        : err instanceof Error
+          ? err.message
+          : 'Unknown error'
+
+      setTickers((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? { ...t, loading: false, error: friendlyMessage }
+            : t
+        )
+      )
     }
   }
 
@@ -228,20 +268,40 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Optimized 30-second polling loop
-  // Only fetches volatile data (live price) - static data is cached
+  // 30-second polling loop. Each cycle refreshes the live quote, the chart
+  // (so the timeline advances), and the SPY overlay. Pre-market boundaries
+  // and gap values are cached and reused.
   useEffect(() => {
-    const interval = setInterval(() => {
-      const current = tickersRef.current
+    const inFlight = pollingInFlightRef.current
 
-      for (const ticker of current) {
-        if (!ticker.symbol || ticker.loading) continue
-        // Pass isPolling=true to trigger cache-optimized fetch
-        refreshTicker(ticker.id, true)
+    const pollOnce = () => {
+      for (const ticker of tickersRef.current) {
+        if (!ticker.symbol) continue
+        if (ticker.loading) continue           // initial fetch in progress
+        if (inFlight.has(ticker.id)) continue  // previous poll still running
+
+        inFlight.add(ticker.id)
+        refreshTicker(ticker.id, true).finally(() => {
+          inFlight.delete(ticker.id)
+        })
       }
-    }, POLL_MS)
+    }
 
-    return () => clearInterval(interval)
+    const interval = setInterval(pollOnce, POLL_MS)
+
+    // Visibility-aware: if the tab was hidden and just became visible again,
+    // poll immediately so the user doesn't see a stale chart on tab return.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        pollOnce()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [])
 
   const activeTicker =

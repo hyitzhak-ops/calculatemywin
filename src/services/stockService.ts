@@ -23,6 +23,10 @@ interface StaticDataCache {
   gapPercent?: number
   chart: ChartPoint[]
   overlay: OverlayPoint[]
+  // Last successful quote — used by stale-while-revalidate so the UI keeps
+  // the previous change/changePercent values when a poll fails, instead of
+  // flatlining to 0.
+  lastQuote?: StockQuote
   fetchedAt: number
 }
 
@@ -170,6 +174,27 @@ function isPreMarketTimestamp(ts: number): boolean {
   return totalMinutes >= PRE_MARKET_START_MIN && totalMinutes < REGULAR_OPEN_MIN
 }
 
+// Default timeout for any single fetch. Tight enough that a stalled CORS
+// proxy can't dominate a refresh cycle, but long enough that the average
+// proxy round-trip (200-1500ms) succeeds comfortably.
+const FETCH_TIMEOUT_MS = 5_000
+
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function safeFetch<T>(
   name: string,
   fetcher: () => Promise<T>
@@ -183,21 +208,19 @@ async function safeFetch<T>(
 }
 
 /**
- * Retry a fetcher with exponential backoff. Used for critical paths where we
- * really want to succeed (e.g. pre-market boundaries, overlay data).
- *
- * Tries up to `maxAttempts` times with delays: 0ms, 800ms, 1600ms.
- * Returns `null` if all attempts return null/falsy or throw.
+ * Retry a fetcher with a short, bounded backoff. Worst-case timing for the
+ * default 2 attempts: 5s + 400ms + 5s = ~10.4s. The previous 3-attempt /
+ * 800ms+1600ms backoff schedule could push a single fetcher past 20s, which
+ * tripped the outer safety timeout in DashboardContext.
  */
 async function fetchWithRetry<T>(
   name: string,
   fetcher: () => Promise<T | null>,
-  maxAttempts = 3
+  maxAttempts = 2
 ): Promise<T | null> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) {
-      const delay = 800 * Math.pow(2, attempt - 1)
-      await new Promise((resolve) => setTimeout(resolve, delay))
+      await new Promise((resolve) => setTimeout(resolve, 400))
       console.info(`[${name}] retry attempt ${attempt + 1}/${maxAttempts}`)
     }
 
@@ -216,6 +239,16 @@ async function fetchWithRetry<T>(
 
   console.warn(`[${name}] all ${maxAttempts} attempts failed`)
   return null
+}
+
+// Finnhub also returns a quote timestamp (Unix seconds) which we use to
+// detect stale quotes (e.g. weekend, before pre-market open, low-volume
+// tickers). We pass it back via a side-channel WeakMap to avoid polluting
+// the StockQuote type, which is consumed throughout the UI.
+const finnhubQuoteTimestamps = new WeakMap<StockQuote, number>()
+
+function getFinnhubQuoteTimestamp(quote: StockQuote): number | undefined {
+  return finnhubQuoteTimestamps.get(quote)
 }
 
 async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
@@ -238,7 +271,7 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
     symbol
   )}&token=${apiKey}`
 
-  const response = await fetch(url)
+  const response = await fetchWithTimeout(url)
   if (!response.ok) {
     console.warn(`[Finnhub] HTTP ${response.status}`)
     return null
@@ -264,7 +297,7 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
       ? (gapDollar / previousClose) * 100
       : undefined
 
-  return {
+  const quote: StockQuote = {
     symbol,
     price: data.c,
     change: data.d,
@@ -277,6 +310,12 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
     gapDollar,
     gapPercent,
   }
+  // data.t is the Finnhub quote timestamp in Unix seconds. Stash it on the
+  // side channel so the live-tip logic can detect a stale quote.
+  if (typeof data.t === 'number' && data.t > 0) {
+    finnhubQuoteTimestamps.set(quote, data.t * 1000)
+  }
+  return quote
 }
 
 /**
@@ -296,9 +335,10 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
 async function fetchPreMarketLevels(
   symbol: string
 ): Promise<{ preMarketHigh?: number; preMarketLow?: number } | null> {
+  const cacheBuster = `&_cb=${Date.now()}`
   const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
     symbol
-  )}?interval=1m&range=1d&includePrePost=true`
+  )}?interval=1m&range=1d&includePrePost=true${cacheBuster}`
 
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -307,7 +347,7 @@ async function fetchPreMarketLevels(
 
   for (const proxyUrl of proxies) {
     try {
-      const response = await fetch(proxyUrl)
+      const response = await fetchWithTimeout(proxyUrl)
       if (!response.ok) continue
 
       const data = await response.json()
@@ -362,17 +402,137 @@ async function fetchPreMarketLevels(
 
 const INTRADAY_RANGES: ChartRange[] = ['10m', '1h', '3h', '1d']
 
+// How fresh the Finnhub quote must be to be trusted for the live tip.
+// During the regular session it ticks every few seconds; if it's older
+// than this, the market is closed (weekend, off-hours) or the ticker is
+// illiquid and we shouldn't paste a stale price onto the chart's right edge.
+const LIVE_QUOTE_FRESHNESS_MS = 90_000
+
+
+// ─── Live Tail ───────────────────────────────────────────────────────────────
+// Yahoo's 1-minute candles can lag 3-5 minutes for thin/penny stocks. To keep
+// the chart's right edge at "now", we accumulate Finnhub quotes in a per-
+// symbol live tail and merge them onto whatever Yahoo returned. Each poll
+// pushes one new tick; the tail is capped and pruned to the current session.
+
+interface LiveTick {
+  timestamp: number
+  price: number
+}
+
+const liveTails = new Map<string, LiveTick[]>()
+const LIVE_TAIL_MAX_LENGTH = 240          // 240 ticks @ 30s = 2h of live tail
+const LIVE_TAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+function pushLiveTick(symbol: string, price: number, timestampMs: number): void {
+  const existing = liveTails.get(symbol) ?? []
+  const cutoff = Date.now() - LIVE_TAIL_MAX_AGE_MS
+
+  // Don't add duplicates within the same poll bucket — keep the latest only.
+  const last = existing[existing.length - 1]
+  let next: LiveTick[]
+  if (last && timestampMs - last.timestamp < 25_000) {
+    next = [...existing.slice(0, -1), { timestamp: timestampMs, price }]
+  } else {
+    next = [...existing, { timestamp: timestampMs, price }]
+  }
+
+  next = next.filter((t) => t.timestamp >= cutoff).slice(-LIVE_TAIL_MAX_LENGTH)
+  liveTails.set(symbol, next)
+}
+
+function getLiveTail(symbol: string): LiveTick[] {
+  const cutoff = Date.now() - LIVE_TAIL_MAX_AGE_MS
+  return (liveTails.get(symbol) ?? []).filter((t) => t.timestamp >= cutoff)
+}
+
+export function clearLiveTail(symbol?: string): void {
+  if (symbol) liveTails.delete(symbol)
+  else liveTails.clear()
+}
+
+/**
+ * Extend an intraday chart's right edge with our accumulated in-session live
+ * tail (Finnhub ticks recorded across polls). This bridges Yahoo's lag —
+ * Yahoo's 1-minute candle endpoint can be 3-5 minutes behind real time on
+ * thin/penny stocks, so without this the chart freezes a few minutes back
+ * even though "updated" timestamps look fresh.
+ *
+ * Each call:
+ *   1. Records the new Finnhub tick into the symbol's live tail (if fresh).
+ *   2. Returns Yahoo's chart + every tail tick newer than Yahoo's last candle.
+ *
+ * The only guard is a freshness check on the Finnhub quote timestamp — if
+ * it's older than 90s the market is closed and we shouldn't graft a stale
+ * price. We do NOT gate on deviation (price difference from Yahoo) because
+ * volatile penny stocks routinely move 20%+ in minutes — that's real action,
+ * not a data error.
+ */
+function appendLiveTip(
+  chart: ChartPoint[],
+  symbol: string,
+  livePrice: number | undefined,
+  range: ChartRange,
+  liveQuoteTimestampMs?: number
+): ChartPoint[] {
+  if (!INTRADAY_RANGES.includes(range)) return chart
+  if (chart.length === 0) return chart
+
+  const config = RANGE_CONFIG[range]
+  const nowMs = Date.now()
+
+  // Decide whether THIS tick is fresh enough to record. (Off-hours / weekend
+  // quotes can be hours old and would just plant a flat step.)
+  let liveIsFresh = livePrice !== undefined
+  if (livePrice !== undefined && liveQuoteTimestampMs !== undefined) {
+    const ageMs = nowMs - liveQuoteTimestampMs
+    if (ageMs > LIVE_QUOTE_FRESHNESS_MS) {
+      liveIsFresh = false
+      console.info(
+        `[LiveTip] Skipping new tick — Finnhub quote is ${Math.round(ageMs / 1000)}s old`
+      )
+    }
+  }
+
+  if (livePrice !== undefined && liveIsFresh) {
+    pushLiveTick(symbol, livePrice, nowMs)
+  }
+
+  const tail = getLiveTail(symbol)
+  if (tail.length === 0) return chart
+
+  const lastChartPoint = chart[chart.length - 1]
+  const yahooTailMs = lastChartPoint?.timestamp ?? 0
+
+  // Only graft tail entries that come AFTER Yahoo's last candle so the live
+  // tail extends the chart instead of overwriting any good Yahoo data.
+  const tailToGraft = tail.filter((t) => t.timestamp > yahooTailMs)
+  if (tailToGraft.length === 0) return chart
+
+  const liveChartPoints: ChartPoint[] = tailToGraft.map((t) => ({
+    time: config.formatTime(new Date(t.timestamp)),
+    price: t.price,
+    timestamp: t.timestamp,
+  }))
+
+  return [...chart, ...liveChartPoints].slice(-config.maxPoints)
+}
+
 async function fetchYahooData(
   symbol: string,
   range: ChartRange
 ): Promise<{ quote: StockQuote; chart: ChartPoint[] } | null> {
   const config = RANGE_CONFIG[range]
   const includePrepost = INTRADAY_RANGES.includes(range)
+  // Cache-buster: append a random nonce so CORS proxy caches don't serve
+  // stale responses. This was the root cause of the "chart frozen" bug —
+  // the proxies were serving cached Yahoo data from minutes ago.
+  const cacheBuster = `&_cb=${Date.now()}`
   const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
     symbol
   )}?interval=${config.yahooInterval}&range=${config.yahooRange}${
     includePrepost ? '&includePrePost=true' : ''
-  }`
+  }${cacheBuster}`
 
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
@@ -383,7 +543,7 @@ async function fetchYahooData(
 
   for (const proxyUrl of proxies) {
     try {
-      const response = await fetch(proxyUrl)
+      const response = await fetchWithTimeout(proxyUrl)
       if (!response.ok) {
         console.warn(`[Yahoo via proxy] HTTP ${response.status}`)
         continue
@@ -602,139 +762,183 @@ export async function fetchStockData(
   const cacheKey = getCacheKey(symbol, range)
   const cached = staticCache.get(cacheKey)
 
-  // ── FAST PATH: Polling mode (volatile data only) ──
-  // When called from the 30s interval, ONLY fetch the current price.
-  // Reuse all cached static data (chart, overlay, pre-market boundaries).
+  // ── FAST PATH: Polling mode ──
+  // On every 30s tick we refresh:
+  //   • the live quote (Finnhub) so price/change update,
+  //   • the chart (Yahoo) so the X-axis timeline advances and a new candle is
+  //     appended,
+  //   • the SPY overlay so it stays aligned with the moving chart window.
+  //
+  // We KEEP cached pre-market boundaries (they're frozen at 9:30 ET) and
+  // gap values, and fall back to them when a fresh fetch can't produce them.
   if (isPolling && cached) {
-    console.info(`[Fetch:Poll] Fetching live price only for ${symbol}`)
+    console.info(`[Fetch:Poll] Refreshing live data for ${symbol}`)
 
-    // Check if cache is missing critical static data (PM levels or overlay).
-    // If so, kick off a SILENT backfill in the background so the next poll
-    // cycle has complete data. This handles the case where the initial fetch
-    // succeeded for the chart but failed for PM/overlay.
+    const isOverlaySymbolPoll = symbol === MARKET_OVERLAY_SYMBOL
+
+    // Use fetchWithRetry for Yahoo paths so transient proxy hiccups don't
+    // leave the chart stuck on stale data. Finnhub stays single-shot — its
+    // /quote endpoint is reliable, and another retry would just slow the
+    // poll cycle.
+    const [finnhubQuote, yahooData, overlayResult] = await Promise.all([
+      safeFetch('Finnhub', () => fetchFinnhubQuote(symbol)),
+      fetchWithRetry('Yahoo-Poll', () => fetchYahooData(symbol, range), 2),
+      isOverlaySymbolPoll
+        ? Promise.resolve(null)
+        : fetchWithRetry(
+            'SPY-overlay-Poll',
+            () => fetchYahooData(MARKET_OVERLAY_SYMBOL, range),
+            2
+          ),
+    ])
+
+    // PM levels: prefer fresh values, fall back to cached. PM is frozen after
+    // 09:30 ET so cached values stay correct for the rest of the session.
     const isMissingPM =
       cached.preMarketHigh === undefined && cached.preMarketLow === undefined
-    const isMissingOverlay =
-      symbol !== MARKET_OVERLAY_SYMBOL && cached.overlay.length === 0
-
-    if (isMissingPM || isMissingOverlay) {
-      console.info(
-        `[Fetch:Poll] Backfilling missing static data for ${symbol}` +
-          ` · PM missing: ${isMissingPM} · Overlay missing: ${isMissingOverlay}`
-      )
-
-      // Fire-and-forget backfill — don't block the polling response
+    if (isMissingPM) {
+      // Try a dedicated PM fetch in the background so the next poll has it
       void (async () => {
-        const tasks: Promise<void>[] = []
-
-        if (isMissingPM) {
-          tasks.push(
-            fetchWithRetry('PreMarket-Backfill', () => fetchPreMarketLevels(symbol)).then(
-              (pm) => {
-                if (pm && (pm.preMarketHigh !== undefined || pm.preMarketLow !== undefined)) {
-                  const updated = staticCache.get(getCacheKey(symbol, range))
-                  if (updated) {
-                    updated.preMarketHigh = pm.preMarketHigh
-                    updated.preMarketLow = pm.preMarketLow
-                    setStaticCache(symbol, range, updated)
-                    console.info(`[Fetch:Poll] ✓ PM backfilled for ${symbol}`)
-                  }
-                }
-              }
-            )
-          )
+        const pm = await fetchWithRetry('PreMarket-Backfill', () =>
+          fetchPreMarketLevels(symbol)
+        )
+        if (pm && (pm.preMarketHigh !== undefined || pm.preMarketLow !== undefined)) {
+          const updated = staticCache.get(getCacheKey(symbol, range))
+          if (updated) {
+            updated.preMarketHigh = pm.preMarketHigh
+            updated.preMarketLow = pm.preMarketLow
+            setStaticCache(symbol, range, updated)
+            console.info(`[Fetch:Poll] ✓ PM backfilled for ${symbol}`)
+          }
         }
-
-        if (isMissingOverlay) {
-          tasks.push(
-            fetchWithRetry('SPY-Backfill', () =>
-              fetchYahooData(MARKET_OVERLAY_SYMBOL, range)
-            ).then((overlayResult) => {
-              if (overlayResult && overlayResult.chart.length > 0) {
-                const updated = staticCache.get(getCacheKey(symbol, range))
-                if (updated && updated.chart.length > 0) {
-                  const windowStart = updated.chart[0]?.timestamp
-                  const windowEnd = updated.chart[updated.chart.length - 1]?.timestamp
-                  let series = overlayResult.chart
-                  if (windowStart !== undefined && windowEnd !== undefined) {
-                    series = series.filter(
-                      (p) => p.timestamp >= windowStart && p.timestamp <= windowEnd
-                    )
-                    if (series.length < 2) series = overlayResult.chart
-                  }
-                  const baseline = series[0]?.price
-                  if (baseline) {
-                    updated.overlay = series.map((p) => ({
-                      timestamp: p.timestamp,
-                      pctChange: ((p.price - baseline) / baseline) * 100,
-                    }))
-                    setStaticCache(symbol, range, updated)
-                    console.info(`[Fetch:Poll] ✓ Overlay backfilled for ${symbol}`)
-                  }
-                }
-              }
-            })
-          )
-        }
-
-        await Promise.allSettled(tasks)
       })()
     }
 
-    const finnhubQuote = await safeFetch('Finnhub', () => fetchFinnhubQuote(symbol))
+    const finalPreMarketHigh =
+      yahooData?.quote.preMarketHigh ?? cached.preMarketHigh
+    const finalPreMarketLow =
+      yahooData?.quote.preMarketLow ?? cached.preMarketLow
+    const finalGapDollar =
+      finnhubQuote?.gapDollar ?? yahooData?.quote.gapDollar ?? cached.gapDollar
+    const finalGapPercent =
+      finnhubQuote?.gapPercent ?? yahooData?.quote.gapPercent ?? cached.gapPercent
 
+    // Build refreshed overlay aligned to the new chart window
+    let overlay: OverlayPoint[] = cached.overlay
+    if (overlayResult && overlayResult.chart.length > 0 && yahooData?.chart) {
+      const primaryChart = yahooData.chart
+      const windowStart = primaryChart[0]?.timestamp
+      const windowEnd = primaryChart[primaryChart.length - 1]?.timestamp
+      let series = overlayResult.chart
+      if (windowStart !== undefined && windowEnd !== undefined) {
+        series = series.filter(
+          (p) => p.timestamp >= windowStart && p.timestamp <= windowEnd
+        )
+        if (series.length < 2) series = overlayResult.chart
+      }
+      const baseline = series[0]?.price
+      if (baseline) {
+        overlay = series.map((p) => ({
+          timestamp: p.timestamp,
+          pctChange: ((p.price - baseline) / baseline) * 100,
+        }))
+      }
+    }
+
+    // Resolve final chart — prefer freshly fetched, fall back to cached.
+    // Then extend with the live tail so the right edge reaches "now" even
+    // if Yahoo's last candle is several minutes old.
+    const finalChart = appendLiveTip(
+      yahooData?.chart ?? cached.chart,
+      symbol,
+      finnhubQuote?.price,
+      range,
+      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+    )
+
+    // Resolve final quote — prefer Finnhub, then Yahoo, then last-known cached
+    let finalQuote: StockQuote | null = null
     if (finnhubQuote) {
-      // Merge live price with cached static data (re-read in case backfill ran)
-      const freshCache = staticCache.get(getCacheKey(symbol, range)) ?? cached
-      const mergedQuote: StockQuote = {
+      finalQuote = {
         ...finnhubQuote,
-        preMarketHigh: finnhubQuote.preMarketHigh ?? freshCache.preMarketHigh,
-        preMarketLow: finnhubQuote.preMarketLow ?? freshCache.preMarketLow,
-        gapDollar: finnhubQuote.gapDollar ?? freshCache.gapDollar,
-        gapPercent: finnhubQuote.gapPercent ?? freshCache.gapPercent,
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
       }
-
-      console.info(`[Fetch:Poll] ✓ Live price updated for ${symbol}, static data from cache`)
-      return {
-        quote: mergedQuote,
-        chart: freshCache.chart,
-        source: 'finnhub',
-        overlay: freshCache.overlay,
+    } else if (yahooData) {
+      finalQuote = {
+        ...yahooData.quote,
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
+      }
+    } else if (cached.lastQuote) {
+      // Stale-while-revalidate: keep the last good quote rather than zeroing
+      // out change/changePercent. Price/high/low/etc. all stay as-is.
+      console.warn(
+        `[Fetch:Poll] Both quote sources failed for ${symbol}, reusing last known quote`
+      )
+      finalQuote = {
+        ...cached.lastQuote,
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
       }
     }
 
-    // If Finnhub fails during polling, use STALE-WHILE-REVALIDATE pattern
-    // Return cached data (stale but valid) rather than blanking the UI
-    console.warn(`[Fetch:Poll] Price fetch failed for ${symbol}, using cached data (stale-while-revalidate)`)
+    if (finalQuote) {
+      // Update cache with the fresh data so subsequent polls have current
+      // chart/overlay and a fresh lastQuote for next stale fallback.
+      setStaticCache(symbol, range, {
+        preMarketHigh: finalPreMarketHigh,
+        preMarketLow: finalPreMarketLow,
+        gapDollar: finalGapDollar,
+        gapPercent: finalGapPercent,
+        chart: finalChart,
+        overlay,
+        lastQuote: finalQuote,
+        fetchedAt: Date.now(),
+      })
 
-    const freshCache = staticCache.get(getCacheKey(symbol, range)) ?? cached
+      console.info(
+        `[Fetch:Poll] ✓ ${symbol} refreshed — quote:${finnhubQuote ? 'finnhub' : yahooData ? 'yahoo' : 'stale'}` +
+          ` chart:${yahooData ? 'fresh' : 'cached'} overlay:${overlayResult ? 'fresh' : 'cached'}`
+      )
 
-    // Reconstruct quote from cached data (use last known price)
-    if (freshCache.chart.length > 0) {
-      const lastCandle = freshCache.chart[freshCache.chart.length - 1]
-      const staleQuote: StockQuote = {
+      return {
+        quote: finalQuote,
+        chart: finalChart,
+        source: finnhubQuote ? 'finnhub' : yahooData ? 'yahoo' : 'finnhub',
+        overlay,
+      }
+    }
+
+    // Total failure — return whatever we cached so the UI doesn't blank.
+    // Still call appendLiveTip so any Finnhub price we got extends the chart.
+    console.warn(
+      `[Fetch:Poll] All sources failed for ${symbol}, holding cached snapshot`
+    )
+    if (cached.lastQuote) {
+      const extendedChart = appendLiveTip(
+        cached.chart,
         symbol,
-        price: lastCandle.price,
-        change: 0,
-        changePercent: 0,
-        high: lastCandle.price * 1.01,
-        low: lastCandle.price * 0.99,
-        open: lastCandle.price,
-        previousClose: lastCandle.price,
-        isMock: false,
-        preMarketHigh: freshCache.preMarketHigh,
-        preMarketLow: freshCache.preMarketLow,
-        gapDollar: freshCache.gapDollar,
-        gapPercent: freshCache.gapPercent,
-      }
-
+        finnhubQuote?.price,
+        range,
+        finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+      )
       return {
-        quote: staleQuote,
-        chart: freshCache.chart,
+        quote: finnhubQuote
+          ? { ...finnhubQuote, preMarketHigh: cached.preMarketHigh, preMarketLow: cached.preMarketLow, gapDollar: cached.gapDollar, gapPercent: cached.gapPercent }
+          : cached.lastQuote,
+        chart: extendedChart,
         source: 'finnhub',
-        overlay: freshCache.overlay,
+        overlay: cached.overlay,
       }
     }
+    // Cache exists but no lastQuote (legacy entry) — fall through to FULL fetch
   }
 
   // ── FULL FETCH: Initial load or cache miss ──
@@ -825,6 +1029,7 @@ export async function fetchStockData(
       gapPercent: finalGapPercent,
       chart: yahooData?.chart ?? [],
       overlay,
+      lastQuote: mergedQuote ?? yahooData?.quote,
       fetchedAt: Date.now(),
     }
     setStaticCache(symbol, range, staticData)
@@ -837,9 +1042,16 @@ export async function fetchStockData(
 
   if (mergedQuote && yahooData) {
     console.info(`[Fetch:Full] Using Finnhub quote + Yahoo chart for ${symbol}`)
+    const liveChart = appendLiveTip(
+      yahooData.chart,
+      symbol,
+      finnhubQuote?.price,
+      range,
+      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+    )
     return {
       quote: mergedQuote,
-      chart: yahooData.chart,
+      chart: liveChart,
       source: finnhubQuote ? 'finnhub' : 'yahoo',
       overlay,
     }
@@ -857,6 +1069,7 @@ export async function fetchStockData(
       gapPercent: finalGapPercent,
       chart: mockChart,
       overlay,
+      lastQuote: mergedQuote,
       fetchedAt: Date.now(),
     })
 
@@ -885,9 +1098,26 @@ export async function fetchStockData(
   }
 
   // ── FALLBACK: Check cache before generating mock ──
-  // If we have cached data but all sources failed, use stale-while-revalidate
+  // If we have cached data but all sources failed, use stale-while-revalidate.
+  // Prefer the last successful quote (preserves change/changePercent) over
+  // synthesizing one from the last candle.
   if (cached) {
     console.warn(`[Fetch:Full] All sources failed for ${symbol}, using cached data (stale)`)
+
+    if (cached.lastQuote) {
+      return {
+        quote: {
+          ...cached.lastQuote,
+          preMarketHigh: cached.preMarketHigh,
+          preMarketLow: cached.preMarketLow,
+          gapDollar: cached.gapDollar,
+          gapPercent: cached.gapPercent,
+        },
+        chart: cached.chart,
+        source: 'finnhub',
+        overlay: cached.overlay,
+      }
+    }
 
     const lastCandle = cached.chart[cached.chart.length - 1]
     if (lastCandle) {
