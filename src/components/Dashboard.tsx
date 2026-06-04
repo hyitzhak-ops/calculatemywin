@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { BarChart3, ShieldCheck, BookOpen } from 'lucide-react'
+import { BarChart3, ShieldCheck, BookOpen, Calculator } from 'lucide-react'
 import { TickerGrid } from './TickerGrid'
 import { RiskManagerTab } from './RiskManagerTab'
 import { JournalReportsTab } from './JournalReportsTab'
+import { PercentCalculator } from './PercentCalculator'
 import { BackupControls } from './BackupControls'
+import { ProviderStatusBadge } from './ProviderStatusBadge'
+import { ProviderDebugPanel } from './ProviderDebugPanel'
 import { useDashboard } from '../context/DashboardContext'
 import { formatUSD } from '../utils/format'
 
-type ActiveTab = 'dashboard' | 'risk-manager' | 'journal'
+type ActiveTab = 'dashboard' | 'risk-manager' | 'journal' | 'calculator'
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard')
@@ -34,6 +37,7 @@ export function Dashboard() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <ProviderStatusBadge />
               <div className="hidden sm:flex items-center gap-3 text-xs text-zinc-500">
                 <span>Today:</span>
                 <span
@@ -73,6 +77,12 @@ export function Dashboard() {
               icon={<BookOpen className="w-4 h-4" />}
               label="Journal & Reports"
             />
+            <TabButton
+              active={activeTab === 'calculator'}
+              onClick={() => setActiveTab('calculator')}
+              icon={<Calculator className="w-4 h-4" />}
+              label="Calculator"
+            />
           </div>
         </div>
       </header>
@@ -82,6 +92,7 @@ export function Dashboard() {
         {activeTab === 'dashboard' && <TickerGrid />}
         {activeTab === 'risk-manager' && <RiskManagerTab />}
         {activeTab === 'journal' && <JournalReportsTab />}
+        {activeTab === 'calculator' && <PercentCalculator />}
       </main>
 
       {/* Footer */}
@@ -90,12 +101,19 @@ export function Dashboard() {
           <p className="text-center text-xs text-zinc-500">
             Not financial advice. Optional{' '}
             <code className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+              VITE_MASSIVE_API_KEY
+            </code>{' '}
+            or{' '}
+            <code className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
               VITE_FINNHUB_API_KEY
             </code>{' '}
-            improves live data; Yahoo Finance and demo fallback used otherwise.
+            for enhanced data; Yahoo Finance and demo fallback used otherwise.
           </p>
         </div>
       </footer>
+
+      {/* Provider Debug Panel */}
+      <ProviderDebugPanel />
     </div>
   )
 }

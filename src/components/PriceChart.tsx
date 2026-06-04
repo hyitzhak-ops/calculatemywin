@@ -21,6 +21,9 @@ interface PriceChartProps {
   overlaySymbol?: string
   preMarketHigh?: number
   preMarketLow?: number
+  previousClose?: number
+  currentPrice?: number
+  isPreMarket?: boolean
 }
 
 interface MergedPoint {
@@ -38,6 +41,9 @@ export function PriceChart({
   overlaySymbol,
   preMarketHigh,
   preMarketLow,
+  previousClose,
+  currentPrice,
+  isPreMarket,
 }: PriceChartProps) {
   const stroke = positive ? '#4ade80' : '#f87171'
   const fillId = positive ? 'greenGradient' : 'redGradient'
@@ -85,9 +91,11 @@ export function PriceChart({
   const candidateExtremes: number[] = [minPrice, maxPrice]
   if (preMarketHigh !== undefined) candidateExtremes.push(preMarketHigh)
   if (preMarketLow !== undefined) candidateExtremes.push(preMarketLow)
+  if (previousClose !== undefined) candidateExtremes.push(previousClose)
+  if (currentPrice !== undefined) candidateExtremes.push(currentPrice)
   const domainMin = Math.min(...candidateExtremes)
   const domainMax = Math.max(...candidateExtremes)
-  const padding = (domainMax - domainMin) * 0.02 || 0.01
+  const padding = (domainMax - domainMin) * 0.04 || 0.02
   const domain: [number, number] = [domainMin - padding, domainMax + padding]
 
   const showOverlay = !!overlay && overlay.length > 1
@@ -156,13 +164,15 @@ export function PriceChart({
               y={preMarketHigh}
               stroke="#34d399"
               strokeDasharray="4 4"
-              strokeOpacity={0.7}
+              strokeOpacity={0.8}
+              strokeWidth={1.5}
             >
               <Label
                 value={`PM High ${formatPrice(preMarketHigh)}`}
                 position="insideTopRight"
                 fill="#34d399"
-                fontSize={9}
+                fontSize={10}
+                fontWeight="bold"
                 fontFamily="JetBrains Mono, monospace"
               />
             </ReferenceLine>
@@ -173,14 +183,54 @@ export function PriceChart({
               y={preMarketLow}
               stroke="#f87171"
               strokeDasharray="4 4"
-              strokeOpacity={0.7}
+              strokeOpacity={0.8}
+              strokeWidth={1.5}
             >
               <Label
                 value={`PM Low ${formatPrice(preMarketLow)}`}
                 position="insideBottomRight"
                 fill="#f87171"
-                fontSize={9}
+                fontSize={10}
+                fontWeight="bold"
                 fontFamily="JetBrains Mono, monospace"
+              />
+            </ReferenceLine>
+          )}
+          {previousClose !== undefined && (
+            <ReferenceLine
+              yAxisId="price"
+              y={previousClose}
+              stroke="#a1a1aa"
+              strokeDasharray="6 3"
+              strokeOpacity={0.7}
+              strokeWidth={1.25}
+            >
+              <Label
+                value={`Prev Close ${formatPrice(previousClose)}`}
+                position="insideRight"
+                fill="#d4d4d8"
+                fontSize={10}
+                fontWeight="bold"
+                fontFamily="JetBrains Mono, monospace"
+              />
+            </ReferenceLine>
+          )}
+          {currentPrice !== undefined && (
+            <ReferenceLine
+              yAxisId="price"
+              y={currentPrice}
+              stroke={isPreMarket ? '#60a5fa' : stroke}
+              strokeOpacity={0.9}
+              strokeWidth={2}
+            >
+              <Label
+                value={`${isPreMarket ? 'Pre-Mkt' : 'Now'} ${formatPrice(currentPrice)}`}
+                position="left"
+                fill={isPreMarket ? '#60a5fa' : stroke}
+                fontSize={11}
+                fontWeight="bold"
+                fontFamily="JetBrains Mono, monospace"
+                offset={4}
               />
             </ReferenceLine>
           )}

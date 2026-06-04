@@ -5,9 +5,10 @@ import type {
   OverlayPoint,
   StockQuote,
 } from '../types'
+import { providerRegistry } from './providers/providerRegistry'
 
-// Optimized polling: 30-second window reduces API rate-limit pressure by 50%
-export const POLL_MS = 30_000
+// 60-second polling: reduces API rate-limit pressure & smooths chart updates
+export const POLL_MS = 60_000
 
 export const MARKET_OVERLAY_SYMBOL = 'SPY'
 
@@ -252,6 +253,14 @@ function getFinnhubQuoteTimestamp(quote: StockQuote): number | undefined {
 }
 
 async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
+  // First try Massive.com provider if available
+  const massiveQuote = await providerRegistry.fetchQuoteWithFallback(symbol)
+  if (massiveQuote) {
+    finnhubQuoteTimestamps.set(massiveQuote.quote, massiveQuote.timestamp)
+    return massiveQuote.quote
+  }
+
+  // Fallback to Finnhub.io
   let apiKey = import.meta.env.VITE_FINNHUB_API_KEY?.trim() || ''
 
   // Strip surrounding quotes if user pasted them
@@ -335,6 +344,17 @@ async function fetchFinnhubQuote(symbol: string): Promise<StockQuote | null> {
 async function fetchPreMarketLevels(
   symbol: string
 ): Promise<{ preMarketHigh?: number; preMarketLow?: number } | null> {
+  // First try Massive.com provider if available
+  const today = new Date().toISOString().split('T')[0]
+  const massivePM = await providerRegistry.fetchPreMarketWithFallback(symbol, today)
+  if (massivePM && (massivePM.preMarketHigh !== undefined || massivePM.preMarketLow !== undefined)) {
+    return {
+      preMarketHigh: massivePM.preMarketHigh,
+      preMarketLow: massivePM.preMarketLow,
+    }
+  }
+
+  // Fallback to Yahoo Finance via CORS proxy
   const cacheBuster = `&_cb=${Date.now()}`
   const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
     symbol
@@ -452,6 +472,14 @@ export function clearLiveTail(symbol?: string): void {
 }
 
 /**
+ * Get the currently active data provider for UI status display.
+ * Returns 'massive' if Massive.com is configured, otherwise 'finnhub'.
+ */
+export function getActiveProvider(): 'massive' | 'finnhub' {
+  return providerRegistry.getActiveProvider() as 'massive' | 'finnhub'
+}
+
+/**
  * Extend an intraday chart's right edge with our accumulated in-session live
  * tail (Finnhub ticks recorded across polls). This bridges Yahoo's lag —
  * Yahoo's 1-minute candle endpoint can be 3-5 minutes behind real time on
@@ -473,7 +501,8 @@ function appendLiveTip(
   symbol: string,
   livePrice: number | undefined,
   range: ChartRange,
-  liveQuoteTimestampMs?: number
+  liveQuoteTimestampMs?: number,
+  previousClose?: number
 ): ChartPoint[] {
   if (!INTRADAY_RANGES.includes(range)) return chart
   if (chart.length === 0) return chart
@@ -484,13 +513,42 @@ function appendLiveTip(
   // Decide whether THIS tick is fresh enough to record. (Off-hours / weekend
   // quotes can be hours old and would just plant a flat step.)
   let liveIsFresh = livePrice !== undefined
-  if (livePrice !== undefined && liveQuoteTimestampMs !== undefined) {
+
+  // CRITICAL: If no timestamp provided, assume stale (could be yesterday's close)
+  if (livePrice !== undefined && liveQuoteTimestampMs === undefined) {
+    liveIsFresh = false
+    console.info(`[LiveTip] Skipping tick — no timestamp provided (likely stale data)`)
+  } else if (livePrice !== undefined && liveQuoteTimestampMs !== undefined) {
     const ageMs = nowMs - liveQuoteTimestampMs
     if (ageMs > LIVE_QUOTE_FRESHNESS_MS) {
       liveIsFresh = false
       console.info(
         `[LiveTip] Skipping new tick — Finnhub quote is ${Math.round(ageMs / 1000)}s old`
       )
+    }
+  }
+
+  // Guard against the "phantom prev-close tick" pattern: if the live price
+  // is suspiciously close (within 0.05%) to yesterday's close AND the chart's
+  // most recent point is meaningfully different, this is almost certainly a
+  // placeholder quote (off-hours, halt, or pre-open). Reject it so the chart
+  // doesn't dive back to the previous close at the right edge.
+  if (
+    livePrice !== undefined &&
+    liveIsFresh &&
+    previousClose !== undefined &&
+    previousClose > 0
+  ) {
+    const drift = Math.abs(livePrice - previousClose) / previousClose
+    const lastPrice = chart[chart.length - 1]?.price
+    if (drift < 0.0005 && lastPrice !== undefined) {
+      const lastDrift = Math.abs(lastPrice - previousClose) / previousClose
+      if (lastDrift > 0.001) {
+        liveIsFresh = false
+        console.info(
+          `[LiveTip] Skipping suspicious prev-close tick — live=${livePrice} prevClose=${previousClose} lastChart=${lastPrice}`
+        )
+      }
     }
   }
 
@@ -558,13 +616,24 @@ async function fetchYahooData(
       }
 
       const meta = result.meta
-      const price = meta.regularMarketPrice
       const previousClose = meta.chartPreviousClose
       const high = meta.regularMarketDayHigh
       const low = meta.regularMarketDayLow
       const open = meta.regularMarketDayOpen
 
-      if (!price || !previousClose) {
+      if (!previousClose) {
+        console.warn('[Yahoo] Missing previous close')
+        continue
+      }
+
+      // During pre-market / pre-open, Yahoo's regularMarketPrice can equal
+      // the previousClose (a placeholder, not a real quote). In that case we
+      // prefer the latest non-placeholder candle close from the timeseries
+      // as the "current" quote price. This prevents the chart's right-edge
+      // spike from leaking back into the headline price as well.
+      let price = meta.regularMarketPrice as number | undefined
+
+      if (!price) {
         console.warn('[Yahoo] Missing price data')
         continue
       }
@@ -583,20 +652,50 @@ async function fetchYahooData(
       let preMarketHigh: number | undefined
       let preMarketLow: number | undefined
 
+      const nowMs = Date.now()
+      // Tolerance for "is this candle a placeholder equal to prev close?"
+      // We use a tight relative tolerance so we don't accidentally drop real
+      // candles whose price legitimately matches yesterday's close.
+      const prevCloseTolerance = previousClose * 0.0001 // 0.01% match
+
       let chartPoints: ChartPoint[] = []
       for (let i = 0; i < timestamps.length; i++) {
         const closePrice = closes[i]
         if (closePrice === null || closePrice === undefined) continue
         const ts = timestamps[i] * 1000
 
+        // Skip future timestamps — Yahoo returns the full session timeline
+        // even before candles have formed. Keeping these would graft phantom
+        // data points at "now+N minutes" with placeholder prices.
+        if (ts > nowMs) continue
+
+        // Skip placeholder candles. Yahoo fills empty regular-session slots
+        // (during pre-market) with the previous close price, which produces
+        // the visible "spike to yesterday's close" at the chart's right edge.
+        // A candle whose close exactly equals the prev close AND whose high
+        // and low also match is the telltale shape of a placeholder.
+        const candleHigh = highs[i]
+        const candleLow = lows[i]
+        const matchesPrevClose =
+          Math.abs(closePrice - previousClose) <= prevCloseTolerance
+        const flatPlaceholder =
+          matchesPrevClose &&
+          (candleHigh === null ||
+            candleHigh === undefined ||
+            Math.abs(candleHigh - previousClose) <= prevCloseTolerance) &&
+          (candleLow === null ||
+            candleLow === undefined ||
+            Math.abs(candleLow - previousClose) <= prevCloseTolerance)
+        if (flatPlaceholder) continue
+
         if (includePrepost && isPreMarketTimestamp(ts)) {
-          const candleHigh = highs[i] ?? closePrice
-          const candleLow = lows[i] ?? closePrice
-          if (preMarketHigh === undefined || candleHigh > preMarketHigh) {
-            preMarketHigh = candleHigh
+          const cHigh = candleHigh ?? closePrice
+          const cLow = candleLow ?? closePrice
+          if (preMarketHigh === undefined || cHigh > preMarketHigh) {
+            preMarketHigh = cHigh
           }
-          if (preMarketLow === undefined || candleLow < preMarketLow) {
-            preMarketLow = candleLow
+          if (preMarketLow === undefined || cLow < preMarketLow) {
+            preMarketLow = cLow
           }
         }
 
@@ -848,12 +947,17 @@ export async function fetchStockData(
     // Resolve final chart — prefer freshly fetched, fall back to cached.
     // Then extend with the live tail so the right edge reaches "now" even
     // if Yahoo's last candle is several minutes old.
+    const pollPrevClose =
+      finnhubQuote?.previousClose ??
+      yahooData?.quote.previousClose ??
+      cached.lastQuote?.previousClose
     const finalChart = appendLiveTip(
       yahooData?.chart ?? cached.chart,
       symbol,
       finnhubQuote?.price,
       range,
-      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined,
+      pollPrevClose
     )
 
     // Resolve final quote — prefer Finnhub, then Yahoo, then last-known cached
@@ -908,10 +1012,14 @@ export async function fetchStockData(
           ` chart:${yahooData ? 'fresh' : 'cached'} overlay:${overlayResult ? 'fresh' : 'cached'}`
       )
 
+      // Determine source: if we got ANY data from Massive (even daily), mark as massive
+      const activeProvider = providerRegistry.getActiveProvider()
+      const dataSource: DataSource = activeProvider === 'massive' ? 'massive' : finnhubQuote ? 'finnhub' : yahooData ? 'yahoo' : 'finnhub'
+
       return {
         quote: finalQuote,
         chart: finalChart,
-        source: finnhubQuote ? 'finnhub' : yahooData ? 'yahoo' : 'finnhub',
+        source: dataSource,
         overlay,
       }
     }
@@ -927,7 +1035,8 @@ export async function fetchStockData(
         symbol,
         finnhubQuote?.price,
         range,
-        finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+        finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined,
+        finnhubQuote?.previousClose ?? cached.lastQuote.previousClose
       )
       return {
         quote: finnhubQuote
@@ -1047,12 +1156,16 @@ export async function fetchStockData(
       symbol,
       finnhubQuote?.price,
       range,
-      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined
+      finnhubQuote ? getFinnhubQuoteTimestamp(finnhubQuote) : undefined,
+      finnhubQuote?.previousClose ?? yahooData.quote.previousClose
     )
+    const activeProvider = providerRegistry.getActiveProvider()
+    const dataSource: DataSource = activeProvider === 'massive' ? 'massive' : finnhubQuote ? 'finnhub' : 'yahoo'
+
     return {
       quote: mergedQuote,
       chart: liveChart,
-      source: finnhubQuote ? 'finnhub' : 'yahoo',
+      source: dataSource,
       overlay,
     }
   }

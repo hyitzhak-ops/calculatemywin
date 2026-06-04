@@ -13,6 +13,47 @@ interface StockTickerPanelProps {
 
 const RANGES: ChartRange[] = ['10m', '1h', '3h', '1d', '1w', '1mo', '1y']
 
+/**
+ * Derive pre-market high/low. Uses explicit PM data from the quote if available,
+ * otherwise falls back to chart extremes during pre-market hours.
+ */
+function derivePreMarketLevel(ticker: Ticker, kind: 'high' | 'low'): number | undefined {
+  const explicit = kind === 'high' ? ticker.quote?.preMarketHigh : ticker.quote?.preMarketLow
+  if (explicit !== undefined) return explicit
+
+  if (!isPreMarketHours() || ticker.chart.length === 0) return undefined
+
+  const prices = ticker.chart.map((p) => p.price).filter((p) => Number.isFinite(p))
+  if (prices.length === 0) return undefined
+
+  return kind === 'high' ? Math.max(...prices) : Math.min(...prices)
+}
+
+/**
+ * Check if current time is during pre-market hours (4:00 AM - 9:30 AM ET)
+ */
+function isPreMarketHours(): boolean {
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(now)
+  let hour = 0
+  let minute = 0
+  for (const p of parts) {
+    if (p.type === 'hour') hour = parseInt(p.value, 10)
+    else if (p.type === 'minute') minute = parseInt(p.value, 10)
+  }
+  if (hour === 24) hour = 0
+  const totalMinutes = hour * 60 + minute
+  const preMarketStart = 4 * 60 // 4:00 AM
+  const marketOpen = 9 * 60 + 30 // 9:30 AM
+  return totalMinutes >= preMarketStart && totalMinutes < marketOpen
+}
+
 export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
   const {
     setTickerInput,
@@ -132,7 +173,7 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
           <>
             {/* Quote display */}
             <div>
-              <div className="flex items-baseline gap-3">
+              <div className="flex items-baseline gap-3 flex-wrap">
                 <span className="text-3xl font-mono tabular-nums text-zinc-100">
                   {formatPrice(ticker.quote.price)}
                 </span>
@@ -146,6 +187,57 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
                     {formatPrice(Math.abs(ticker.quote.change))} ({formatPercent(ticker.quote.changePercent)})
                   </span>
                 </div>
+                {/* Pre-Market Current Price Indicator */}
+                {isPreMarketHours() && ticker.quote.previousClose && (() => {
+                  // Only show a "live" pre-market price when it's clearly
+                  // distinct from yesterday's close. If the two are within
+                  // 0.05% of each other, the data feed is almost certainly
+                  // returning the previous regular-session close (free-tier
+                  // feeds don't include real-time pre-market prints), so
+                  // showing it labeled "Pre-Market" would be misleading.
+                  const cur = ticker.quote.price
+                  const prev = ticker.quote.previousClose
+                  const distinct =
+                    prev > 0 && Math.abs(cur - prev) / prev > 0.0005
+                  if (!distinct) {
+                    return (
+                      <div
+                        className="flex items-center gap-2 text-xs bg-zinc-800/60 border border-zinc-700 rounded px-2.5 py-1"
+                        title="Real-time pre-market quotes are not available on the current data plan. Showing yesterday's regular-session close."
+                      >
+                        <span className="inline-flex items-center gap-1 text-zinc-400 font-semibold uppercase text-[10px] tracking-wider">
+                          Pre-Market
+                        </span>
+                        <span className="text-zinc-500">N/A</span>
+                        <span className="text-zinc-600">|</span>
+                        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">
+                          Close
+                        </span>
+                        <span className="font-mono tabular-nums text-zinc-300">
+                          {formatPrice(prev)}
+                        </span>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="flex items-center gap-2 text-xs bg-blue-500/15 border border-blue-500/40 rounded px-2.5 py-1 shadow-sm">
+                      <span className="inline-flex items-center gap-1 text-blue-300 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                        Pre-Market
+                      </span>
+                      <span className="font-mono tabular-nums text-blue-100 font-bold">
+                        {formatPrice(cur)}
+                      </span>
+                      <span className="text-zinc-500">|</span>
+                      <span className="text-zinc-400 text-[10px] uppercase tracking-wider">
+                        Close
+                      </span>
+                      <span className="font-mono tabular-nums text-zinc-300">
+                        {formatPrice(prev)}
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
               <div className="mt-2">
                 <span
@@ -165,7 +257,11 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
                 >
                   {ticker.quote.isMock
                     ? 'Demo'
-                    : `Live · ${ticker.source || 'unknown'}`}
+                    : ticker.source === 'massive'
+                      ? '⚡ Live · Massive'
+                      : ticker.source === 'finnhub'
+                        ? '🟢 Live · Finnhub'
+                        : `Live · ${ticker.source || 'unknown'}`}
                 </span>
               </div>
             </div>
@@ -248,8 +344,11 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
             positive={positive}
             overlay={ticker.overlay}
             overlaySymbol={MARKET_OVERLAY_SYMBOL}
-            preMarketHigh={ticker.quote?.preMarketHigh}
-            preMarketLow={ticker.quote?.preMarketLow}
+            preMarketHigh={derivePreMarketLevel(ticker, 'high')}
+            preMarketLow={derivePreMarketLevel(ticker, 'low')}
+            previousClose={ticker.quote?.previousClose}
+            currentPrice={ticker.quote?.price}
+            isPreMarket={isPreMarketHours()}
           />
           {ticker.overlay.length > 1 && (
             <div className="px-1 mt-1 flex items-center gap-2 text-[10px] text-zinc-500">
@@ -278,8 +377,22 @@ function AdvancedMetricsRow({ ticker }: AdvancedMetricsRowProps) {
     q.gapPercent !== undefined &&
     Number.isFinite(q.gapDollar) &&
     Number.isFinite(q.gapPercent)
-  const hasPreMarket =
-    q.preMarketHigh !== undefined && q.preMarketLow !== undefined
+
+  // Use explicit PM data if available, otherwise derive from chart data
+  // during pre-market hours
+  let pmHigh = q.preMarketHigh
+  let pmLow = q.preMarketLow
+
+  if ((pmHigh === undefined || pmLow === undefined) && isPreMarketHours() && ticker.chart.length > 0) {
+    // Derive from current chart data as a best-effort fallback
+    const prices = ticker.chart.map((p) => p.price).filter((p) => Number.isFinite(p))
+    if (prices.length > 0) {
+      pmHigh = pmHigh ?? Math.max(...prices)
+      pmLow = pmLow ?? Math.min(...prices)
+    }
+  }
+
+  const hasPreMarket = pmHigh !== undefined && pmLow !== undefined
 
   if (!hasGap && !hasPreMarket) return null
 
@@ -318,11 +431,11 @@ function AdvancedMetricsRow({ ticker }: AdvancedMetricsRowProps) {
             Pre-Mkt
           </span>
           <span className="text-emerald-300">
-            H {formatPrice(q.preMarketHigh!)}
+            H {formatPrice(pmHigh!)}
           </span>
           <span className="opacity-50">·</span>
           <span className="text-red-300">
-            L {formatPrice(q.preMarketLow!)}
+            L {formatPrice(pmLow!)}
           </span>
         </div>
       )}

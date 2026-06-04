@@ -1,4 +1,4 @@
-export type DataSource = 'finnhub' | 'yahoo' | 'mock'
+export type DataSource = 'massive' | 'finnhub' | 'yahoo' | 'mock'
 export type ChartRange = '10m' | '1h' | '3h' | '1d' | '1w' | '1mo' | '1y'
 
 export interface ChartPoint {

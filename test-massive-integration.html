@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Massive.com API Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #0a0a0a;
+      color: #e4e4e7;
+    }
+    .container {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 24px;
+    }
+    h1 {
+      color: #3b82f6;
+      margin-top: 0;
+    }
+    .input-group {
+      margin: 20px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #a1a1aa;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      color: #e4e4e7;
+      font-size: 14px;
+      font-family: 'Monaco', monospace;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      margin-right: 8px;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    button:disabled {
+      background: #3f3f46;
+      cursor: not-allowed;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 16px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: 'Monaco', monospace;
+      font-size: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .success {
+      border-color: #10b981;
+      background: #064e3b;
+    }
+    .error {
+      border-color: #ef4444;
+      background: #7f1d1d;
+    }
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+    .status.success {
+      background: #10b981;
+      color: white;
+    }
+    .status.error {
+      background: #ef4444;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚡ Massive.com API Integration Test</h1>
+    <p style="color: #a1a1aa; margin-bottom: 24px;">
+      Test your Massive.com (Polygon.io) API key before adding it to .env
+    </p>
+
+    <div class="input-group">
+      <label for="apiKey">Massive.com API Key:</label>
+      <input
+        type="password"
+        id="apiKey"
+        placeholder="Enter your API key from massive.com/dashboard/keys"
+      />
+    </div>
+
+    <div class="input-group">
+      <label for="symbol">Test Symbol:</label>
+      <input
+        type="text"
+        id="symbol"
+        placeholder="AAPL"
+        value="AAPL"
+      />
+    </div>
+
+    <button onclick="testQuote()" id="testBtn">Test Quote API</button>
+    <button onclick="testPreMarket()" id="testPMBtn">Test Pre-Market API</button>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    async function testQuote() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+      const resultDiv = document.getElementById('result');
+      const testBtn = document.getElementById('testBtn');
+
+      if (!apiKey) {
+        resultDiv.innerHTML = '<div class="result error">❌ Please enter your API key</div>';
+        return;
+      }
+
+      if (!symbol) {
+        resultDiv.innerHTML = '<div class="result error">❌ Please enter a symbol</div>';
+        return;
+      }
+
+      testBtn.disabled = true;
+      resultDiv.innerHTML = '<div class="result">⏳ Testing API connection...</div>';
+
+      try {
+        // Test 1: Last Trade
+        const tradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${apiKey}`;
+        const tradeResp = await fetch(tradeUrl);
+        const tradeData = await tradeResp.json();
+
+        if (!tradeResp.ok) {
+          throw new Error(`HTTP ${tradeResp.status}: ${tradeData.error || 'Unknown error'}`);
+        }
+
+        if (tradeData.status !== 'OK') {
+          throw new Error(`API returned status: ${tradeData.status}`);
+        }
+
+        const price = tradeData.results?.p || 'N/A';
+        const timestamp = tradeData.results?.t || Date.now();
+
+        // Test 2: Previous Close
+        const prevUrl = `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${apiKey}`;
+        const prevResp = await fetch(prevUrl);
+        const prevData = await prevResp.json();
+
+        const prevClose = prevData.results?.[0]?.c || 'N/A';
+
+        // Test 3: Daily Open/Close
+        const today = new Date().toISOString().split('T')[0];
+        const ocUrl = `https://api.polygon.io/v1/open-close/${symbol}/${today}?adjusted=true&apiKey=${apiKey}`;
+        const ocResp = await fetch(ocUrl);
+        const ocData = await ocResp.json();
+
+        const open = ocData.open || 'N/A';
+        const high = ocData.high || 'N/A';
+        const low = ocData.low || 'N/A';
+
+        resultDiv.innerHTML = `
+          <div class="result success">
+            <div class="status success">✅ API KEY VALID</div>
+            <strong>Quote Data for ${symbol}:</strong>
+
+            Last Trade Price: $${price}
+            Previous Close: $${prevClose}
+            Today's Open: $${open}
+            Today's High: $${high}
+            Today's Low: $${low}
+            Timestamp: ${new Date(timestamp).toLocaleString()}
+
+            <strong style="display: block; margin-top: 16px; color: #10b981;">
+            ✅ Your Massive.com API key is working correctly!
+            </strong>
+
+            <strong style="display: block; margin-top: 12px;">Next Step:</strong>
+            Add this line to your .env file:
+            <code style="display: block; background: #0a0a0a; padding: 8px; margin-top: 8px; border-radius: 4px;">
+VITE_MASSIVE_API_KEY=${apiKey}
+            </code>
+
+            Then restart the dev server:
+            <code style="display: block; background: #0a0a0a; padding: 8px; margin-top: 8px; border-radius: 4px;">
+npm run dev
+            </code>
+          </div>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `
+          <div class="result error">
+            <div class="status error">❌ API TEST FAILED</div>
+            <strong>Error:</strong> ${error.message}
+
+            <strong style="display: block; margin-top: 16px;">Common Issues:</strong>
+            • Invalid API key - verify at massive.com/dashboard/keys
+            • API key not activated yet
+            • Rate limit exceeded (free tier: 5 calls/min)
+            • Symbol not found (use valid ticker like AAPL, TSLA, NVDA)
+
+            <strong style="display: block; margin-top: 16px;">API Response:</strong>
+            ${JSON.stringify(error, null, 2)}
+          </div>
+        `;
+      } finally {
+        testBtn.disabled = false;
+      }
+    }
+
+    async function testPreMarket() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+      const resultDiv = document.getElementById('result');
+      const testBtn = document.getElementById('testPMBtn');
+
+      if (!apiKey) {
+        resultDiv.innerHTML = '<div class="result error">❌ Please enter your API key</div>';
+        return;
+      }
+
+      if (!symbol) {
+        resultDiv.innerHTML = '<div class="result error">❌ Please enter a symbol</div>';
+        return;
+      }
+
+      testBtn.disabled = true;
+      resultDiv.innerHTML = '<div class="result">⏳ Testing Pre-Market API...</div>';
+
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/minute/${today}/${today}?adjusted=true&sort=asc&apiKey=${apiKey}`;
+
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${data.error || 'Unknown error'}`);
+        }
+
+        if (data.status !== 'OK') {
+          throw new Error(`API returned status: ${data.status}`);
+        }
+
+        const results = data.results || [];
+        const count = results.length;
+
+        let pmHigh = undefined;
+        let pmLow = undefined;
+        let pmCount = 0;
+
+        // Filter for pre-market hours (4:00-9:30 AM ET)
+        for (const bar of results) {
+          const timestamp = bar.t;
+          const date = new Date(timestamp);
+          const hour = parseInt(date.toLocaleString('en-US', {
+            timeZone: 'America/New_York',
+            hour: '2-digit',
+            hour12: false
+          }));
+          const minute = parseInt(date.toLocaleString('en-US', {
+            timeZone: 'America/New_York',
+            minute: '2-digit'
+          }));
+          const totalMinutes = hour * 60 + minute;
+
+          if (totalMinutes >= 240 && totalMinutes < 570) {
+            pmCount++;
+            const high = bar.h || bar.c;
+            const low = bar.l || bar.c;
+
+            if (pmHigh === undefined || high > pmHigh) pmHigh = high;
+            if (pmLow === undefined || low < pmLow) pmLow = low;
+          }
+        }
+
+        resultDiv.innerHTML = `
+          <div class="result success">
+            <div class="status success">✅ PRE-MARKET API WORKING</div>
+            <strong>Pre-Market Data for ${symbol}:</strong>
+
+            Total 1-minute bars: ${count}
+            Pre-market bars (4:00-9:30 AM ET): ${pmCount}
+            Pre-market High: ${pmHigh ? '$' + pmHigh.toFixed(2) : 'N/A (no PM activity yet)'}
+            Pre-market Low: ${pmLow ? '$' + pmLow.toFixed(2) : 'N/A (no PM activity yet)'}
+
+            <strong style="display: block; margin-top: 16px; color: #10b981;">
+            ${pmCount > 0 ? '✅ Pre-market data available with 1-minute accuracy!' : 'ℹ️ No pre-market activity yet (weekend or before 4 AM ET)'}
+            </strong>
+          </div>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `
+          <div class="result error">
+            <div class="status error">❌ PRE-MARKET TEST FAILED</div>
+            <strong>Error:</strong> ${error.message}
+          </div>
+        `;
+      } finally {
+        testBtn.disabled = false;
+      }
+    }
+
+    // Allow Enter key to trigger test
+    document.getElementById('apiKey').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') testQuote();
+    });
+    document.getElementById('symbol').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') testQuote();
+    });
+  </script>
+</body>
+</html>
