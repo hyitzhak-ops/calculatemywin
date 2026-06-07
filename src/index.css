@@ -74,3 +74,60 @@ input[type='number'] {
 .animate-toxic-pulse {
   animation: toxicPulse 1.6s ease-in-out infinite;
 }
+
+/* Smooth scrolling for mobile tab navigation */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Better touch interaction */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Improve mobile performance */
+@media (max-width: 640px) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, a, input[type="submit"] {
+    touch-action: manipulation;
+  }
+
+  /* Ensure smooth scrolling on mobile */
+  html {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Better button touch targets on mobile */
+@media (max-width: 640px) {
+  button:not(.no-min-height) {
+    min-height: 44px;
+  }
+
+  /* Icon-only buttons should still have good touch targets */
+  button[title] {
+    min-width: 44px;
+  }
+
+  input[type="text"],
+  input[type="number"],
+  select {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  /* Better input touch targets */
+  input, select, textarea {
+    min-height: 44px;
+  }
+}

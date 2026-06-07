@@ -98,18 +98,18 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
       `}
     >
       {/* Header bar */}
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-800/80">
+      <div className="flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-zinc-800/80">
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-zinc-100 truncate">
             {ticker.symbol || 'New Ticker'}
           </h3>
-          <p className="text-xs text-zinc-500 truncate">{subtitle}</p>
+          <p className="text-[10px] sm:text-xs text-zinc-500 truncate">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           <button
             onClick={() => setActiveTicker(ticker.id)}
             className={`
-              text-xs px-2.5 py-1 rounded-full font-medium transition
+              text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 rounded-full font-medium transition touch-manipulation
               ${
                 isActive
                   ? 'bg-emerald-500/20 text-emerald-400'
@@ -122,7 +122,7 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
           <button
             onClick={() => refreshTicker(ticker.id)}
             disabled={ticker.loading || !ticker.symbol}
-            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="p-2 sm:p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed transition touch-manipulation"
             title="Refresh"
           >
             <RefreshCw
@@ -132,7 +132,7 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
           {removable && (
             <button
               onClick={() => removeTicker(ticker.id)}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-400 transition"
+              className="p-2 sm:p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-400 transition touch-manipulation"
               title="Remove"
             >
               <X className="w-4 h-4" />
@@ -141,7 +141,7 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
         {/* Search form */}
         <form onSubmit={handleLoad} className="flex gap-2">
           <input
@@ -152,12 +152,12 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
             }
             onFocus={() => setActiveTicker(ticker.id)}
             placeholder="Symbol (e.g., AAPL)"
-            className="flex-1 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 uppercase placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            className="flex-1 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2.5 sm:py-2 text-sm text-zinc-100 uppercase placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 touch-manipulation"
           />
           <button
             type="submit"
             disabled={ticker.loading || !ticker.inputSymbol.trim()}
-            className="px-4 py-2 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="px-4 sm:px-4 py-2.5 sm:py-2 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition touch-manipulation"
           >
             Load
           </button>
@@ -173,15 +173,15 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
           <>
             {/* Quote display */}
             <div>
-              <div className="flex items-baseline gap-3 flex-wrap">
-                <span className="text-3xl font-mono tabular-nums text-zinc-100">
+              <div className="flex items-baseline gap-2 sm:gap-3 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-mono tabular-nums text-zinc-100">
                   {formatPrice(ticker.quote.price)}
                 </span>
-                <div className={`flex items-center gap-1 font-mono text-sm ${profitColorClass(ticker.quote.change)}`}>
+                <div className={`flex items-center gap-1 font-mono text-xs sm:text-sm ${profitColorClass(ticker.quote.change)}`}>
                   {positive ? (
-                    <TrendingUp className="w-4 h-4" />
+                    <TrendingUp className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                   ) : (
-                    <TrendingDown className="w-4 h-4" />
+                    <TrendingDown className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
                   )}
                   <span className="tabular-nums">
                     {formatPrice(Math.abs(ticker.quote.change))} ({formatPercent(ticker.quote.changePercent)})
@@ -270,7 +270,7 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
             <AdvancedMetricsRow ticker={ticker} />
 
             {/* OHLC stats */}
-            <div className="grid grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div>
                 <div className="text-zinc-500 mb-0.5">Open</div>
                 <div className="font-mono tabular-nums text-zinc-100">
@@ -300,14 +300,14 @@ export function StockTickerPanel({ ticker, removable }: StockTickerPanelProps) {
         )}
 
         {/* Range selector */}
-        <div className="border border-zinc-700/50 rounded-md p-1 flex gap-1">
+        <div className="border border-zinc-700/50 rounded-md p-1 flex gap-1 overflow-x-auto no-scrollbar">
           {RANGES.map((range) => (
             <button
               key={range}
               onClick={() => handleRangeChange(range)}
               disabled={ticker.loading}
               className={`
-                flex-1 text-xs font-mono py-1 rounded transition
+                flex-1 min-w-[44px] text-xs font-mono py-1.5 sm:py-1 rounded transition whitespace-nowrap
                 ${
                   ticker.range === range
                     ? 'bg-emerald-500/20 text-emerald-400'
@@ -399,24 +399,24 @@ function AdvancedMetricsRow({ ticker }: AdvancedMetricsRowProps) {
   const gapPositive = (q.gapPercent ?? 0) >= 0
 
   return (
-    <div className="flex flex-wrap gap-2 text-[11px]">
+    <div className="flex flex-wrap gap-1.5 sm:gap-2 text-[10px] sm:text-[11px]">
       {hasGap && (
         <div
-          className={`flex items-center gap-2 px-2.5 py-1 rounded-md border font-mono tabular-nums ${
+          className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 rounded-md border font-mono tabular-nums ${
             gapPositive
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
               : 'bg-red-500/10 border-red-500/30 text-red-300'
           }`}
           title="Gap = today's open vs. yesterday's close"
         >
-          <span className="text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
+          <span className="text-[8px] sm:text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
             Gap
           </span>
           <span>
             {gapPositive ? '+' : ''}
             {(q.gapPercent ?? 0).toFixed(2)}%
           </span>
-          <span className="opacity-70">
+          <span className="opacity-70 hidden sm:inline">
             ({gapPositive ? '+' : ''}
             {formatPrice(q.gapDollar ?? 0)})
           </span>
@@ -424,17 +424,17 @@ function AdvancedMetricsRow({ ticker }: AdvancedMetricsRowProps) {
       )}
       {hasPreMarket && (
         <div
-          className="flex items-center gap-2 px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900/60 text-zinc-300 font-mono tabular-nums"
+          className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900/60 text-zinc-300 font-mono tabular-nums"
           title="Pre-market high/low (4:00–9:30 ET)"
         >
-          <span className="text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
+          <span className="text-[8px] sm:text-[9px] uppercase tracking-wider opacity-70 font-sans font-semibold">
             Pre-Mkt
           </span>
-          <span className="text-emerald-300">
+          <span className="text-emerald-300 text-[9px] sm:text-[10px]">
             H {formatPrice(pmHigh!)}
           </span>
           <span className="opacity-50">·</span>
-          <span className="text-red-300">
+          <span className="text-red-300 text-[9px] sm:text-[10px]">
             L {formatPrice(pmLow!)}
           </span>
         </div>

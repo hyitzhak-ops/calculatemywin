@@ -127,16 +127,16 @@ export function RiskManagerTab() {
             No closed trades yet today.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="w-full text-xs sm:text-sm min-w-[600px]">
               <thead>
-                <tr className="text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left font-medium px-2 py-2">Symbol</th>
-                  <th className="text-right font-medium px-2 py-2">Shares</th>
-                  <th className="text-right font-medium px-2 py-2">Buy</th>
-                  <th className="text-right font-medium px-2 py-2">Sell</th>
-                  <th className="text-right font-medium px-2 py-2">Profit</th>
-                  <th className="text-right font-medium px-2 py-2">When</th>
+                <tr className="text-[10px] sm:text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left font-medium px-2 sm:px-3 py-2">Symbol</th>
+                  <th className="text-right font-medium px-2 sm:px-3 py-2">Shares</th>
+                  <th className="text-right font-medium px-2 sm:px-3 py-2">Buy</th>
+                  <th className="text-right font-medium px-2 sm:px-3 py-2">Sell</th>
+                  <th className="text-right font-medium px-2 sm:px-3 py-2">Profit</th>
+                  <th className="text-right font-medium px-2 sm:px-3 py-2 whitespace-nowrap">When</th>
                 </tr>
               </thead>
               <tbody>
@@ -145,26 +145,26 @@ export function RiskManagerTab() {
                     key={c.id}
                     className="border-b border-zinc-900 last:border-0"
                   >
-                    <td className="px-2 py-2 font-medium text-zinc-200">
+                    <td className="px-2 sm:px-3 py-2 font-medium text-zinc-200">
                       {c.symbol}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-zinc-300">
+                    <td className="px-2 sm:px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
                       {c.shares}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-zinc-300">
+                    <td className="px-2 sm:px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
                       {formatUSD(c.buyPrice)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-zinc-300">
+                    <td className="px-2 sm:px-3 py-2 text-right font-mono tabular-nums text-zinc-300">
                       {formatUSD(c.sellPrice)}
                     </td>
                     <td
-                      className={`px-2 py-2 text-right font-mono tabular-nums ${profitColorClass(
+                      className={`px-2 sm:px-3 py-2 text-right font-mono tabular-nums ${profitColorClass(
                         c.profitUSD
                       )}`}
                     >
                       {formatUSD(c.profitUSD)}
                     </td>
-                    <td className="px-2 py-2 text-right text-xs text-zinc-500">
+                    <td className="px-2 sm:px-3 py-2 text-right text-[10px] sm:text-xs text-zinc-500 whitespace-nowrap">
                       {formatDateTime(c.timestamp)}
                     </td>
                   </tr>
@@ -1106,17 +1106,17 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
                       {formatPercent(tier.pct * 100)}
                     </span>
                   </div>
-                  <div className="mt-1.5 text-base font-mono tabular-nums text-emerald-200">
+                  <div className="mt-1.5 text-sm sm:text-base font-mono tabular-nums text-emerald-200">
                     {formatUSD(tier.targetPrice)}
                   </div>
                   <div className="mt-2 pt-2 border-t border-emerald-500/15 space-y-0.5">
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs">
                       <span className="text-zinc-500">Total</span>
                       <span className="font-mono tabular-nums text-zinc-300">
                         {formatUSD(tier.totalValue)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs">
                       <span className="text-zinc-500">Profit</span>
                       <span className="font-mono tabular-nums text-emerald-400">
                         +{formatUSD(tier.netProfit)}
@@ -1149,17 +1149,17 @@ function ActiveTradeCard({ trade, onRemove, onClose }: ActiveTradeCardProps) {
                       −{formatPercent(tier.pct * 100)}
                     </span>
                   </div>
-                  <div className="mt-1.5 text-base font-mono tabular-nums text-red-200">
+                  <div className="mt-1.5 text-sm sm:text-base font-mono tabular-nums text-red-200">
                     {formatUSD(tier.stopPrice)}
                   </div>
                   <div className="mt-2 pt-2 border-t border-red-500/15 space-y-0.5">
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs">
                       <span className="text-zinc-500">Total</span>
                       <span className="font-mono tabular-nums text-zinc-300">
                         {formatUSD(tier.totalValue)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs">
                       <span className="text-zinc-500">Loss</span>
                       <span className="font-mono tabular-nums text-red-400">
                         −{formatUSD(tier.netLoss)}
