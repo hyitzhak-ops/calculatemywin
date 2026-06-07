@@ -26,3 +26,7 @@ dist-ssr
 # Environment variables
 .env
 .env.local
+
+# Claude settings and build info
+.claude/settings.local.json
+*.tsbuildinfo
