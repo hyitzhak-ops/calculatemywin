@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Sparkles, Lock } from 'lucide-react';
+import { Sparkles, Lock, Unlock } from 'lucide-react';
 import { anchorTiers } from './anchorsData';
 import { useProfit } from './ProfitContext';
 import AnchorCard from './AnchorCard';
 import type { AnchorTier } from './types';
+
+const allProducts = anchorTiers.flatMap((tier) => tier.products);
 
 function distanceToRange(value: number, [min, max]: [number, number]) {
   if (value < min) return min - value;
@@ -79,6 +81,49 @@ function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string
   );
 }
 
+function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<string>; onRealize: (id: string) => void }) {
+  const { profitUSD, profitILS } = useProfit();
+
+  const belowOrEqual = useMemo(
+    () =>
+      [...allProducts]
+        .filter((product) => product.priceUSD <= profitUSD)
+        .sort((a, b) => b.priceUSD - a.priceUSD),
+    [profitUSD],
+  );
+
+  if (belowOrEqual.length === 0) return null;
+
+  return (
+    <section className="mx-auto max-w-6xl px-4">
+      <div className="rounded-2xl border border-[#334155] bg-[#1e293b]/60 p-5 sm:p-6">
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Unlock size={18} className="text-slate-300" />
+            <h2 className="text-base font-bold text-slate-100 sm:text-lg">
+              כל מה שאפשר לממש עד הרווח הנוכחי ({profitILS.toLocaleString()} ₪)
+            </h2>
+          </div>
+          <span className="text-xs text-slate-500">{belowOrEqual.length} אפשרויות בהישג יד</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {belowOrEqual.map((product) => (
+            <AnchorCard
+              key={product.id}
+              product={product}
+              highlighted
+              compact
+              realized={realizedIds.has(product.id)}
+              onRealize={() => onRealize(product.id)}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function RealityAnchorGrid() {
   const { tier: activeTier } = useActiveTier();
   const [realizedIds, setRealizedIds] = useState<Set<string>>(new Set());
@@ -90,6 +135,7 @@ export default function RealityAnchorGrid() {
   return (
     <div className="flex flex-col gap-8">
       <MatchedAnchorsBar realizedIds={realizedIds} onRealize={handleRealize} />
+      <AffordableBelowSection realizedIds={realizedIds} onRealize={handleRealize} />
 
       <section className="mx-auto max-w-6xl px-4 pb-4">
         <div className="flex flex-col gap-10">
