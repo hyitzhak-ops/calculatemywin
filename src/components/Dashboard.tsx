@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BarChart3, ShieldCheck, BookOpen, Calculator } from 'lucide-react'
+import { BarChart3, ShieldCheck, BookOpen, Calculator, Anchor } from 'lucide-react'
 import { TickerGrid } from './TickerGrid'
 import { RiskManagerTab } from './RiskManagerTab'
 import { JournalReportsTab } from './JournalReportsTab'
@@ -7,10 +7,11 @@ import { PercentCalculator } from './PercentCalculator'
 import { BackupControls } from './BackupControls'
 import { ProviderStatusBadge } from './ProviderStatusBadge'
 import { ProviderDebugPanel } from './ProviderDebugPanel'
+import { RealityAnchorPage } from './RealityAnchor/RealityAnchorPage'
 import { useDashboard } from '../context/DashboardContext'
 import { formatUSD } from '../utils/format'
 
-type ActiveTab = 'dashboard' | 'risk-manager' | 'journal' | 'calculator'
+type ActiveTab = 'dashboard' | 'risk-manager' | 'journal' | 'calculator' | 'reality-anchor'
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard')
@@ -99,6 +100,12 @@ export function Dashboard() {
               icon={<Calculator className="w-4 h-4" />}
               label="Calculator"
             />
+            <TabButton
+              active={activeTab === 'reality-anchor'}
+              onClick={() => setActiveTab('reality-anchor')}
+              icon={<Anchor className="w-4 h-4" />}
+              label="Reality Anchor"
+            />
           </div>
         </div>
       </header>
@@ -109,6 +116,7 @@ export function Dashboard() {
         {activeTab === 'risk-manager' && <RiskManagerTab />}
         {activeTab === 'journal' && <JournalReportsTab />}
         {activeTab === 'calculator' && <PercentCalculator />}
+        {activeTab === 'reality-anchor' && <RealityAnchorPage />}
       </main>
 
       {/* Footer */}
