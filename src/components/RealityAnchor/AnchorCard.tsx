@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Wallet, Lock } from 'lucide-react';
+import { Wallet, Lock, ArrowUpCircle } from 'lucide-react';
 import clsx from 'clsx';
 import type { AnchorProduct } from './types';
 
@@ -8,6 +8,9 @@ interface AnchorCardProps {
   highlighted?: boolean;
   compact?: boolean;
   realized?: boolean;
+  affordable?: boolean;
+  missingUSD?: number;
+  missingILS?: number;
   onRealize?: () => void;
 }
 
@@ -16,6 +19,9 @@ export default function AnchorCard({
   highlighted,
   compact,
   realized,
+  affordable = true,
+  missingUSD,
+  missingILS,
   onRealize,
 }: AnchorCardProps) {
   return (
@@ -41,9 +47,14 @@ export default function AnchorCard({
         <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-slate-100 backdrop-blur">
           {product.category}
         </span>
-        {highlighted && (
+        {highlighted && affordable && (
           <span className="absolute bottom-2 left-2 rounded-full bg-[#10b981] px-2.5 py-1 text-xs font-bold text-slate-950">
             תואם לרווח שלך
+          </span>
+        )}
+        {highlighted && !affordable && (
+          <span className="absolute bottom-2 left-2 rounded-full bg-slate-700 px-2.5 py-1 text-xs font-bold text-slate-200">
+            בטווח הזה
           </span>
         )}
       </div>
@@ -63,13 +74,13 @@ export default function AnchorCard({
           </div>
         </div>
 
-        {highlighted && realized && (
+        {highlighted && affordable && realized && (
           <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-[#10b981]/50 bg-[#10b981]/10 px-3 py-2 text-sm font-bold text-[#10b981]">
             <Lock size={16} />
             נעול בהצלחה!
           </div>
         )}
-        {highlighted && !realized && onRealize && (
+        {highlighted && affordable && !realized && onRealize && (
           <button
             type="button"
             onClick={onRealize}
@@ -78,6 +89,14 @@ export default function AnchorCard({
             <Wallet size={16} />
             קח את זה הביתה עכשיו (מימוש רווח)
           </button>
+        )}
+        {highlighted && !affordable && (
+          <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-dashed border-slate-600 bg-slate-800/40 px-3 py-2 text-xs font-medium text-slate-400">
+            <ArrowUpCircle size={14} />
+            <span>
+              עוד ${missingUSD?.toLocaleString()} ({missingILS?.toLocaleString()} ₪) ותוכל לממש את זה
+            </span>
+          </div>
         )}
       </div>
     </motion.article>

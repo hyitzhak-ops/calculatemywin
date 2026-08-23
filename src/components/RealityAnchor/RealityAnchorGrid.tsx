@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Sparkles, Lock, Unlock } from 'lucide-react';
-import { anchorTiers } from './anchorsData';
+import { anchorTiers, usdToIls } from './anchorsData';
 import { useProfit } from './ProfitContext';
 import AnchorCard from './AnchorCard';
 import type { AnchorTier } from './types';
@@ -64,16 +64,23 @@ function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string
             transition={{ duration: 0.2 }}
             className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
           >
-            {sortedProducts.map((product) => (
-              <AnchorCard
-                key={product.id}
-                product={product}
-                highlighted
-                compact
-                realized={realizedIds.has(product.id)}
-                onRealize={() => onRealize(product.id)}
-              />
-            ))}
+            {sortedProducts.map((product) => {
+              const affordable = product.priceUSD <= profitUSD;
+              const missingUSD = affordable ? undefined : product.priceUSD - profitUSD;
+              return (
+                <AnchorCard
+                  key={product.id}
+                  product={product}
+                  highlighted
+                  compact
+                  affordable={affordable}
+                  missingUSD={missingUSD}
+                  missingILS={missingUSD !== undefined ? usdToIls(missingUSD) : undefined}
+                  realized={realizedIds.has(product.id)}
+                  onRealize={() => onRealize(product.id)}
+                />
+              );
+            })}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -125,6 +132,7 @@ function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<s
 }
 
 export default function RealityAnchorGrid() {
+  const { profitUSD } = useProfit();
   const { tier: activeTier } = useActiveTier();
   const [realizedIds, setRealizedIds] = useState<Set<string>>(new Set());
 
@@ -161,15 +169,22 @@ export default function RealityAnchorGrid() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {tier.products.map((product) => (
-                    <AnchorCard
-                      key={product.id}
-                      product={product}
-                      highlighted={isActive}
-                      realized={realizedIds.has(product.id)}
-                      onRealize={() => handleRealize(product.id)}
-                    />
-                  ))}
+                  {tier.products.map((product) => {
+                    const affordable = product.priceUSD <= profitUSD;
+                    const missingUSD = affordable ? undefined : product.priceUSD - profitUSD;
+                    return (
+                      <AnchorCard
+                        key={product.id}
+                        product={product}
+                        highlighted={isActive}
+                        affordable={affordable}
+                        missingUSD={missingUSD}
+                        missingILS={missingUSD !== undefined ? usdToIls(missingUSD) : undefined}
+                        realized={realizedIds.has(product.id)}
+                        onRealize={() => handleRealize(product.id)}
+                      />
+                    );
+                  })}
                 </div>
 
                 {isActive && realizedIds.size > 0 && (
