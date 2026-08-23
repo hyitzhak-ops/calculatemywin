@@ -9,7 +9,7 @@ export default function ProfitSlider() {
   const percent = ((profitUSD - MIN_PROFIT) / (MAX_PROFIT - MIN_PROFIT)) * 100;
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-6">
+    <section className="py-2">
       <div className="rounded-2xl border border-[#334155] bg-[#1e293b] p-5 sm:p-7">
         <div className="mb-5 flex items-center gap-2 text-slate-300">
           <TrendingUp size={18} className="text-[#10b981]" />

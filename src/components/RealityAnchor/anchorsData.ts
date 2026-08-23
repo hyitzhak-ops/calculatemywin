@@ -645,3 +645,5 @@ export const anchorTiers: AnchorTier[] = [
     ],
   },
 ];
+
+export const allProducts = anchorTiers.flatMap((tier) => tier.products);

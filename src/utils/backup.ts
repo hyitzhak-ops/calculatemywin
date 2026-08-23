@@ -5,6 +5,7 @@ export const STORAGE_KEYS = {
   completedTrades: 'calculatemywin_completed_trades',
   dailyGoal: 'calculatemywin_daily_goal',
   dailyJournalNotes: 'calculatemywin_journal_notes',
+  realityAnchorRealizations: 'calculatemywin_reality_anchor_realizations',
 } as const
 
 const LEGACY_STORAGE_KEYS = ['calculatemywin_simulations'] as const
@@ -95,12 +96,15 @@ export function validateBackup(raw: unknown): ValidationResult {
     Array.isArray(data.activeTrades) || Array.isArray(data.completedTrades)
   const hasNotes =
     data.dailyJournalNotes !== undefined && data.dailyJournalNotes !== null
+  const hasRealizations =
+    data.realityAnchorRealizations !== undefined &&
+    data.realityAnchorRealizations !== null
 
-  if (!hasTrades && !hasNotes) {
+  if (!hasTrades && !hasNotes && !hasRealizations) {
     return {
       ok: false,
       reason:
-        'Missing required keys (expected activeTrades, completedTrades, or dailyJournalNotes).',
+        'Missing required keys (expected activeTrades, completedTrades, dailyJournalNotes, or realityAnchorRealizations).',
     }
   }
 
@@ -140,11 +144,17 @@ function isValidGoal(v: unknown): boolean {
   return typeof g.min === 'number' && typeof g.max === 'number'
 }
 
+function isCountsRecord(v: unknown): boolean {
+  if (!isPlainObject(v)) return false
+  return Object.values(v).every((n) => typeof n === 'number')
+}
+
 const SHAPE_VALIDATORS: Record<BackupKey, (v: unknown) => boolean> = {
   activeTrades: isPlainArray,
   completedTrades: isPlainArray,
   dailyGoal: isValidGoal,
   dailyJournalNotes: (v) => isPlainObject(v) || isPlainArray(v),
+  realityAnchorRealizations: isCountsRecord,
 }
 
 export function applyBackup(payload: BackupPayload): ApplyResult {

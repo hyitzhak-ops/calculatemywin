@@ -21,7 +21,7 @@ const rules = [
 
 export default function IronRulesBanner() {
   return (
-    <section className="mx-auto max-w-6xl px-4 pt-6">
+    <section>
       <div className="rounded-2xl border border-[#ef4444]/50 bg-[#ef4444]/5 p-5 shadow-[0_0_0_1px_rgba(239,68,68,0.5),0_0_24px_rgba(239,68,68,0.25)] sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <span className="text-lg">🛑</span>

@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Sparkles, Lock, Unlock } from 'lucide-react';
-import { anchorTiers, usdToIls } from './anchorsData';
+import { Sparkles, Unlock } from 'lucide-react';
+import { allProducts, anchorTiers, usdToIls } from './anchorsData';
 import { useProfit } from './ProfitContext';
+import { useRealizations } from './RealizationsContext';
 import AnchorCard from './AnchorCard';
 import type { AnchorTier } from './types';
-
-const allProducts = anchorTiers.flatMap((tier) => tier.products);
 
 function distanceToRange(value: number, [min, max]: [number, number]) {
   if (value < min) return min - value;
@@ -33,9 +32,10 @@ function useActiveTier(): { tier: AnchorTier; isExactMatch: boolean } {
   }, [profitUSD]);
 }
 
-function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string>; onRealize: (id: string) => void }) {
+function MatchedAnchorsBar() {
   const { profitUSD } = useProfit();
   const { tier, isExactMatch } = useActiveTier();
+  const { counts, realize, resetOne } = useRealizations();
 
   const sortedProducts = useMemo(
     () => [...tier.products].sort((a, b) => Math.abs(a.priceUSD - profitUSD) - Math.abs(b.priceUSD - profitUSD)),
@@ -43,7 +43,7 @@ function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string
   );
 
   return (
-    <section className="mx-auto max-w-6xl px-4">
+    <section>
       <div className="rounded-2xl border border-[#10b981]/50 bg-gradient-to-b from-[#10b981]/10 to-transparent p-5 shadow-[0_0_0_1px_rgba(34,197,94,0.5),0_0_24px_rgba(34,197,94,0.35)] sm:p-6">
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -76,8 +76,9 @@ function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string
                   affordable={affordable}
                   missingUSD={missingUSD}
                   missingILS={missingUSD !== undefined ? usdToIls(missingUSD) : undefined}
-                  realized={realizedIds.has(product.id)}
-                  onRealize={() => onRealize(product.id)}
+                  realizationCount={counts[product.id] ?? 0}
+                  onRealize={() => realize(product.id)}
+                  onReset={() => resetOne(product.id)}
                 />
               );
             })}
@@ -88,8 +89,9 @@ function MatchedAnchorsBar({ realizedIds, onRealize }: { realizedIds: Set<string
   );
 }
 
-function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<string>; onRealize: (id: string) => void }) {
+function AffordableBelowSection() {
   const { profitUSD, profitILS } = useProfit();
+  const { counts, realize, resetOne } = useRealizations();
 
   const belowOrEqual = useMemo(
     () =>
@@ -102,7 +104,7 @@ function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<s
   if (belowOrEqual.length === 0) return null;
 
   return (
-    <section className="mx-auto max-w-6xl px-4">
+    <section>
       <div className="rounded-2xl border border-[#334155] bg-[#1e293b]/60 p-5 sm:p-6">
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -121,8 +123,9 @@ function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<s
               product={product}
               highlighted
               compact
-              realized={realizedIds.has(product.id)}
-              onRealize={() => onRealize(product.id)}
+              realizationCount={counts[product.id] ?? 0}
+              onRealize={() => realize(product.id)}
+              onReset={() => resetOne(product.id)}
             />
           ))}
         </div>
@@ -134,18 +137,14 @@ function AffordableBelowSection({ realizedIds, onRealize }: { realizedIds: Set<s
 export default function RealityAnchorGrid() {
   const { profitUSD } = useProfit();
   const { tier: activeTier } = useActiveTier();
-  const [realizedIds, setRealizedIds] = useState<Set<string>>(new Set());
-
-  const handleRealize = (id: string) => {
-    setRealizedIds((prev) => new Set(prev).add(id));
-  };
+  const { counts, realize, resetOne } = useRealizations();
 
   return (
     <div className="flex flex-col gap-8">
-      <MatchedAnchorsBar realizedIds={realizedIds} onRealize={handleRealize} />
-      <AffordableBelowSection realizedIds={realizedIds} onRealize={handleRealize} />
+      <MatchedAnchorsBar />
+      <AffordableBelowSection />
 
-      <section className="mx-auto max-w-6xl px-4 pb-4">
+      <section className="pb-4">
         <div className="flex flex-col gap-10">
           {anchorTiers.map((tier) => {
             const isActive = tier.id === activeTier.id;
@@ -180,19 +179,13 @@ export default function RealityAnchorGrid() {
                         affordable={affordable}
                         missingUSD={missingUSD}
                         missingILS={missingUSD !== undefined ? usdToIls(missingUSD) : undefined}
-                        realized={realizedIds.has(product.id)}
-                        onRealize={() => handleRealize(product.id)}
+                        realizationCount={counts[product.id] ?? 0}
+                        onRealize={() => realize(product.id)}
+                        onReset={() => resetOne(product.id)}
                       />
                     );
                   })}
                 </div>
-
-                {isActive && realizedIds.size > 0 && (
-                  <div className="mt-4 flex items-center gap-2 text-sm font-medium text-[#10b981]">
-                    <Lock size={14} />
-                    <span>{realizedIds.size} רווחים ננעלו הפעם 🔒</span>
-                  </div>
-                )}
               </div>
             );
           })}

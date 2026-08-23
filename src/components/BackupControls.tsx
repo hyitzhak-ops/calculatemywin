@@ -61,7 +61,7 @@ export function BackupControls({ variant = 'header' }: BackupControlsProps) {
       }
 
       const proceed = window.confirm(
-        'Restoring will overwrite all current trades, journal notes, and settings on this device. Continue?'
+        'Restoring will overwrite all current trades, journal notes, settings, and Reality Anchor realizations on this device. Continue?'
       )
       if (!proceed) return
 

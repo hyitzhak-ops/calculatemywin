@@ -8,7 +8,7 @@ export default function ScaleOutCalculator() {
   const halfUSD = profitUSD / 2;
 
   return (
-    <section className="mx-auto max-w-6xl px-4 pb-8">
+    <section className="pb-2">
       <div className="rounded-2xl border border-[#f59e0b]/40 bg-[#f59e0b]/5 p-5 sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <Zap size={18} className="text-[#f59e0b]" />

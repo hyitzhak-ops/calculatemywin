@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Wallet, Lock, ArrowUpCircle } from 'lucide-react';
+import { Wallet, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 import type { AnchorProduct } from './types';
 
@@ -7,22 +7,24 @@ interface AnchorCardProps {
   product: AnchorProduct;
   highlighted?: boolean;
   compact?: boolean;
-  realized?: boolean;
   affordable?: boolean;
   missingUSD?: number;
   missingILS?: number;
+  realizationCount?: number;
   onRealize?: () => void;
+  onReset?: () => void;
 }
 
 export default function AnchorCard({
   product,
   highlighted,
   compact,
-  realized,
   affordable = true,
   missingUSD,
   missingILS,
+  realizationCount = 0,
   onRealize,
+  onReset,
 }: AnchorCardProps) {
   return (
     <motion.article
@@ -72,15 +74,27 @@ export default function AnchorCard({
             </span>
             <span className="text-xs text-slate-500">/ ${product.priceUSD.toLocaleString()}</span>
           </div>
+
+          {realizationCount > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span>
+                מספר מימושים: <span className="font-bold text-slate-200">{realizationCount}</span>
+              </span>
+              {onReset && (
+                <button
+                  type="button"
+                  onClick={onReset}
+                  title="אפס מימושים לפריט הזה"
+                  className="rounded-md border border-[#334155] p-1 text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {highlighted && affordable && realized && (
-          <div className="mt-3 flex items-center justify-center gap-2 rounded-lg border border-[#10b981]/50 bg-[#10b981]/10 px-3 py-2 text-sm font-bold text-[#10b981]">
-            <Lock size={16} />
-            נעול בהצלחה!
-          </div>
-        )}
-        {highlighted && affordable && !realized && onRealize && (
+        {highlighted && affordable && onRealize && (
           <button
             type="button"
             onClick={onRealize}
