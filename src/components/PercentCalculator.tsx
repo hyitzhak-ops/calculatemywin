@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
+import { PercentSliderCalculator } from './PercentSliderCalculator'
 
 interface PriceTier {
   percentage: number
@@ -48,6 +49,9 @@ export function PercentCalculator() {
           Pure mathematical sandbox to visualize price ranges and targets in 5% intervals
         </p>
       </div>
+
+      {/* Slider Calculator */}
+      <PercentSliderCalculator />
 
       {/* Input Section */}
       <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-4 sm:p-6">
